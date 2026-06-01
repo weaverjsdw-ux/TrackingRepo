@@ -19,6 +19,11 @@ gmail = [
     "google-api-python-client>=2.0",
     "google-auth-oauthlib>=1.0",
 ]
+# Phase 3 Sheets adapter (live use only; the matching/cross-check is tested with a fake).
+sheets = [
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -73,3 +73,17 @@ def test_bh_raw_via_clicks_derive_is_21(real_send):
     result = bh.resolve_bh(None, master_link_counts=link_counts(real_send / "export_27241338.csv"))
     assert result.bh == 21
     assert result.method == "clicks-derive(common-parent)"
+
+
+def test_overview_pdf_summary_parses_real_layout(real_send):
+    from tracking import overview
+    s = overview.parse_summary(real_send / "Job_689524_Overview_06012026.pdf")
+    assert s == {
+        "Total Sent": 8272,
+        "Hard Bounces": 68,
+        "Soft Bounces": 546,
+        "Block Bounces": 466,
+        "Unique Opens": 2146,
+        "Unique Clicks": 180,
+        "Unsubscribes": 32,
+    }

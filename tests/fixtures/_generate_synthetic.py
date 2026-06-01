@@ -133,9 +133,26 @@ def _write_overview_pdf(name: str) -> None:
     except ImportError:
         print(f"SKIP {name}: reportlab not installed (regenerate with `pip install reportlab`)")
         return
+    # Mirror the real overview's Summary layout so overview.parse_summary is
+    # tested against the same shapes in CI. Counts match the synthetic files.
+    lines = [
+        "Summary",
+        "Engagement Tracking Report Overview",
+        "Total Sent:6",
+        "Hard Bounce: 2",
+        "Soft Bounce: 0",
+        "Block Bounce: 0",
+        "Unique Opens:4",
+        "Total Unique",
+        "Opens 4 4",
+        "Clicks 9 9",
+        "Unsubscribes - 1",
+    ]
     c = canvas.Canvas(str(OUT / name))
-    c.drawString(72, 720, "Engagement Tracking Report — Overview")
-    c.drawString(72, 700, "Total Sent: 6   Unique Opens: 4   Unique Clicks: 9")
+    y = 760
+    for line in lines:
+        c.drawString(72, y, line)
+        y -= 20
     c.showPage()
     c.save()
 
