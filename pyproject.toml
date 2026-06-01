@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engagement-tracker"
+version = "0.1.0"
+description = "Downstream processing for Engagement Tracking Reports (Phase 1: identify, parse, BH, naming)."
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "pdfplumber>=0.11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+# Phase 2 Gmail adapter (live use only; the orchestration is tested with a fake).
+gmail = [
+    "google-api-python-client>=2.0",
+    "google-auth-oauthlib>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "realdata: tests that run against the real (git-ignored) example folder; skipped when absent (e.g. in CI).",
+]

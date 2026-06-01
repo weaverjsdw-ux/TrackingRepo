@@ -1,0 +1,11 @@
+# Preserve golden fixtures byte-for-byte: the parser is tested against a BOM and
+# embedded newlines, so EOL conversion must NOT touch these files.
+tests/fixtures/synthetic/** -text
+*.pdf binary
+*.csv -text
+
+# Source/text files: normalize to LF in the repo.
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf

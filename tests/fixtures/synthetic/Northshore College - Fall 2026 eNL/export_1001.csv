@@ -1,0 +1,8 @@
+﻿Subscriber Key,Email Address,First Name,Last Name,FullName2,State,Birth date,Age,Gender,Marital Status,Class Year,Donor ID,Client Defined 1,Client Defined 2,Client Defined 3,Monthly Article URL for Web Words,Account Name,SF Status
+s1,a@x.org,Ann,Lee,Ms. Lee,,,,,,,,,,,,,ok
+s2,b@x.org,Bob,Smith,"Smith, Jr.",,,,,,,,,,,,"Acme, Inc.",
+s3,c@x.org,José,Núñez,Sr. Núñez,,,,,,,,,,,,,
+s4,d@x.org,Dee,Park,,,,,,,,,,,,,"Line one
+line two",
+s5,e@x.org,Eve,,,,,,,,,,,,,,,
+s6,f@x.org,Foo,,,,,,,,,,,,,,,
