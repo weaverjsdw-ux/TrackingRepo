@@ -34,6 +34,9 @@ print("\n".join(r.log))   # auditable per-run log
 | `bh.py` | Two live paths: **request-file primary** (BH = its row count) and **clicks-derive fallback** (booklet = common parent of the `/article-N` links; article/system/CTA links excluded). Both present & disagree → use request file + warn. Fail loud on zero/ambiguous; logs the chosen link each run. |
 | `pipeline.py` | Orchestrates identify → count → name → BH into a **non-destructive** dry-run plan + log. Lead scoring is ignored (out of scope). |
 | `intake.py` (Phase 2) | Source-agnostic Gmail intake: group labeled emails by send → stage to a drop folder → dedup → process → mark-processed → move to `processed/`. The Gmail wire protocol sits behind the `EmailSource` interface (testable with a fake; no creds). |
+| `overview.py` (Phase 3) | Parse the overview-PDF Summary into expected per-metric totals (used for the cross-check). |
+| `sheet.py` (Phase 3) | `build_sheet_plan` (loud on missing-but-expected metric / unmatched bounce / BH=0; flags fallback BH; warns on snapshot drift) + `write_send` (match client row × metric-header column; loud on missing row/column). |
+| `gmail_source.py` / `sheets_writer.py` | Live adapters behind the `EmailSource` / `SheetWriter` interfaces (optional `[gmail]`/`[sheets]` extras, lazy imports). **Structural-only until run live.** |
 
 ## Fixtures / PII
 
@@ -59,6 +62,36 @@ the exact label name, the report-email **subject convention** (how Client /
 Season / Year / Type are encoded — currently the default parser assumes the
 `Client - Season Year Type` folder-name form), and the mark-processed strategy
 (remove label / add a done label / archive). See `.env.example`.
+
+Decisions locked: **OAuth user-consent** auth; subject = `Client - Season Year Type`;
+mark-processed = **remove the intake label**; completeness gate = core (Total
+Sent + Unique Opens + Unique Clicks + overview PDF), other metrics optional.
+
+## Phase 3 — Sheet write-back (logic green; live run pending creds)
+
+Matching (client row × metric-header column) and the safety cross-check are
+fully tested offline with a `FakeSheet`. Before any write:
+- a metric the **overview PDF** reports as nonzero but whose file is **absent
+  fails loud** — never written as a silent 0;
+- the three identical-header bounce files are **sub-typed** by matching their row
+  counts to the PDF's Hard/Soft/Block totals;
+- **BH via the clicks-derive fallback is flagged**, and **BH == 0 fails loud**;
+- file vs PDF count differences (snapshot drift) **warn**, and the file count is
+  written.
+
+Remaining to go live: the operator shares a **copy of the sheet** and adds the
+tool's **service account as Editor**; the coder then confirms the **live header
+labels** (matched by text, with a `header_overrides` hook for any that differ)
+and the **client-column** convention. Adapter: `sheets_writer.GoogleSheetsWriter`
+(`pip install -e .[sheets]`).
+
+## Repo & CI
+
+Local git repo initialized; **CI** (`.github/workflows/ci.yml`) runs
+`pytest -m "not realdata"` on push/PR — the synthetic, PII-free subset. The real
+example folder is git-ignored and lives outside the repo, so CI never sees PII.
+**Use a private remote only.** Definition-of-done practiced via the red→green
+commit pair for Phase 3.
 
 ## Out of scope / deprecated
 
