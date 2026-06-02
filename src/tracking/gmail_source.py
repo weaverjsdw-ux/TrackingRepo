@@ -91,7 +91,18 @@ class GmailSource:
                 if not self._client_secret:
                     raise RuntimeError("GOOGLE_OAUTH_CLIENT_SECRET is not set.")
                 flow = InstalledAppFlow.from_client_secrets_file(self._client_secret, SCOPES)
-                creds = flow.run_local_server(port=0)
+                creds = flow.run_local_server(
+                    port=0,
+                    open_browser=True,
+                    authorization_prompt_message=(
+                        "\nA browser window is opening for Google sign-in.\n"
+                        "Sign in as the report inbox, click Allow, then return here.\n"
+                        "Do NOT close this window or press Ctrl-C until it says Authorized.\n"
+                    ),
+                    success_message=(
+                        "Authorized — you can close this browser tab and return to the terminal."
+                    ),
+                )
             token.parent.mkdir(parents=True, exist_ok=True)
             token.write_text(creds.to_json(), encoding="utf-8")
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
