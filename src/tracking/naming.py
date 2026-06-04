@@ -40,8 +40,8 @@ OVERVIEW_DESCRIPTION = "Engagement Tracking Report"
 # The request (booklet) file's description (operator decision). The words
 # "Request Your" are NOT present in the export data -- they come from the email's
 # CTA text -- so this is a fixed label, not data-derived.
-# FLAG: this label may vary by client; when that surfaces, move it to a
-# per-client override (e.g. clients.csv) rather than hard-coding per client.
+# FLAG: this label may vary by client; when that surfaces, move it to a small
+# per-client override/config rather than hard-coding per client.
 REQUEST_FILE_DESCRIPTION = "Request Your"
 
 _SEP = " - "
