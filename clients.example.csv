@@ -1,0 +1,10 @@
+client,hipaa,pc_name,pc_email
+# One row per client. Copy this file to clients.csv (git-ignored) and fill it in.
+#   client   = the client name exactly as it appears in the send identity / sheet
+#              (e.g. "Bradley University"). Used to look up HIPAA status + contact.
+#   hipaa    = yes | no  (yes -> email the report to the project coordinator;
+#                          no  -> notify kathryn.baugh@pentera.com to upload)
+#   pc_name  = project coordinator's name (HIPAA clients; used in the email merge)
+#   pc_email = project coordinator's email (HIPAA clients)
+Bradley University,no,,
+Example HIPAA Client,yes,Jane Coordinator,jane.coordinator@examplehospital.org
