@@ -104,6 +104,49 @@ def parse_send_identity(folder_name: str) -> SendIdentity:
     return SendIdentity(client=client, season=season, year=year, type=type_)
 
 
+def parse_send_identity_from_prefix(prefix: str) -> SendIdentity:
+    """Parse the space-joined prefix form 'Bradley University Spring 2026 eNL'
+    (no ' - ' separator) -> SendIdentity.
+
+    Used for the overview-PDF email subject, which the operator types as
+    '<Client> <Season> <Year> <Type> - Engagement Tracking Report'. The 4-digit
+    token is the year; the single token before it is the season; everything
+    before the season is the (multi-word) client; everything after the year is
+    the type (eNL/ePC/eQC/...). Raises loudly on anything that does not fit.
+    """
+    tokens = prefix.split()
+    year_idx = next((i for i, t in enumerate(tokens) if _YEAR_RE.match(t)), None)
+    if year_idx is None or year_idx < 1 or year_idx + 1 >= len(tokens):
+        raise ValueError(
+            f"Cannot parse send identity from prefix {prefix!r}: expected "
+            f"'<Client> <Season> <Year> <Type>'."
+        )
+    client = " ".join(tokens[: year_idx - 1]).strip()
+    season = tokens[year_idx - 1]
+    year = tokens[year_idx]
+    type_ = " ".join(tokens[year_idx + 1 :]).strip()
+    if not client or not season or not type_:
+        raise ValueError(
+            f"Cannot parse send identity from prefix {prefix!r}: "
+            f"client={client!r} season={season!r} year={year!r} type={type_!r}."
+        )
+    return SendIdentity(client=client, season=season, year=year, type=type_)
+
+
+def parse_overview_subject(subject: str) -> SendIdentity:
+    """Parse the overview-PDF email subject
+    '<Client> <Season> <Year> <Type> - Engagement Tracking Report' -> identity.
+    Raises loudly if the subject is not in that exact form."""
+    s = subject.strip()
+    suffix = f"{_SEP}{OVERVIEW_DESCRIPTION}"
+    if not s.lower().endswith(suffix.lower()):
+        raise ValueError(
+            f"Subject {subject!r} is not an overview-PDF subject "
+            f"(must end with '{suffix}')."
+        )
+    return parse_send_identity_from_prefix(s[: len(s) - len(suffix)].strip())
+
+
 def finished_csv_name(identity: SendIdentity, description: str) -> str:
     """'<prefix> - <Description>.csv'. The one true CSV namer."""
     description = description.strip()

@@ -138,31 +138,25 @@ def resolve_bh(
     - else master present  -> clicks-derive (FALLBACK).
     - both present & disagree -> use request file, attach a warning.
     """
-    derived: BHResult | None = None
-    if master_link_counts is not None:
-        try:
-            derived = derive_from_master(master_link_counts)
-        except BHError:
-            derived = None  # tolerated only when a request file is present (below)
-
+    # The request export is authoritative when present (operator decision): it
+    # isolates exactly the booklet link the operator wants in BG, which legitimately
+    # differs from any clicks-derive guess (different link), so we do NOT cross-check
+    # or warn -- we trust the export.
     if request_count is not None:
-        log = [f"BH request-file: {request_count} (booklet={request_link})"]
-        warning = None
-        if derived is not None and derived.bh != request_count:
-            warning = (
-                f"request-file BH={request_count} disagrees with clicks-derive "
-                f"BH={derived.bh} (likely different export snapshots); using "
-                f"request file per operator decision."
-            )
-            log.append("WARNING: " + warning)
-        booklet = [request_link] if request_link else (derived.booklet_links if derived else [])
-        return BHResult(request_count, booklet, "request-file",
-                        log_lines=log, warning=warning)
+        return BHResult(
+            request_count,
+            [request_link] if request_link else [],
+            "request-file",
+            log_lines=[f"BH request-file: {request_count} (booklet={request_link})"],
+        )
 
-    if derived is not None:
-        return derived
+    # FALLBACK only: no request export. This is a best-effort guess of the booklet
+    # link and is flagged loudly downstream (sheet.build_sheet_plan) so the operator
+    # verifies it before the value is written.
+    if master_link_counts is not None:
+        return derive_from_master(master_link_counts)
 
     raise BHError(
-        "Cannot compute BH: no request file and no usable master Unique Clicks "
-        "file (or the clicks-derive failed). Operator confirmation required."
+        "Cannot compute BH: no request export and no master Unique Clicks file. "
+        "Operator confirmation required."
     )

@@ -1,35 +1,45 @@
 """Phase 2 intake — source-agnostic orchestration (BRIEF §1).
 
-The puller reads a dedicated Gmail label, saves attachments into an internal
-drop folder per send, and the Phase 1 pipeline processes that folder. This
-module owns everything EXCEPT the Gmail wire protocol, which sits behind the
-EmailSource interface so the orchestration is testable with a fake source and a
-file can be hand-dropped for a manual re-run (BRIEF §1).
+Reality of how reports arrive (confirmed against the live inbox): ExactTarget
+sends ONE "Email Export" notification per file, each carrying in its body
+`Exported File: …`, `Exported Type: <Send|Open|click|bounce|unsub>`, and
+`JobID: <n>`. The operator's system separately sends a "Tracking Export" email
+whose subject is `<Client> <Season> <Year> <Type> - Engagement Tracking Report`
+and whose body says `…for job <n>…` with the overview PDF attached.
 
-Responsibilities (BRIEF §1):
-  * group one-or-several report emails into the send they belong to,
-  * stage attachments into <drop_root>/inbox/<Client - Season Year Type>/,
-  * dedup (a re-pulled message or a duplicate attachment is not re-saved),
-  * tolerate out-of-order / delayed arrival (an incomplete send stays pending),
-  * mark messages processed and move the completed folder to <drop_root>/processed/.
+So a send is assembled by **JobID**: all export emails for one send share a
+JobID, and the overview-PDF email of the same JobID supplies the identity. This
+module groups by JobID, stages every attachment into a JobID-keyed drop folder,
+dedups, runs the Phase 1 pipeline (identity from the overview subject), and on a
+complete send marks the messages processed and moves the folder to processed/.
 
-The actual Gmail client (OAuth/service account) is the EmailSource
-implementation in gmail_source.py; it is intentionally NOT imported here.
+The Gmail wire protocol lives behind EmailSource (tested here with a fake).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 
 from . import naming
+from .naming import SendIdentity
 from .pipeline import SendResult, assess_completeness, process_folder
 
 STATE_FILE = ".intake_state.json"
+
+# ExactTarget export-notification body, e.g.
+# "… Exported File: export_27241394.csv Exported Type: click Exported for - JobID: 687422 …"
+_EXPORT_RE = re.compile(
+    r"Exported File:\s*(?P<file>\S+)\s+Exported Type:\s*(?P<type>\w+).*?JobID:\s*(?P<job>\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
+# Overview-PDF email body, e.g. "The PDF file for job 687422 is attached."
+_OVERVIEW_JOB_RE = re.compile(r"for job\s*(?P<job>\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -43,6 +53,7 @@ class EmailMessage:
     id: str
     subject: str
     attachments: tuple[Attachment, ...]
+    body: str = ""
 
 
 @runtime_checkable
@@ -56,12 +67,43 @@ class EmailSource(Protocol):
 
 @dataclass
 class StagedSend:
-    folder_name: str
+    job_id: str
     drop_folder: Path
     message_ids: list[str]
-    result: SendResult | None = None  # set when processing succeeded
-    pending_reason: str | None = None  # set when left pending (delayed/incomplete)
+    identity: SendIdentity | None = None
+    result: SendResult | None = None     # set when processing succeeded
+    pending_reason: str | None = None    # set when left pending
     log: list[str] = field(default_factory=list)
+
+    @property
+    def folder_name(self) -> str:
+        return self.identity.folder_name if self.identity else f"job-{self.job_id}"
+
+
+def parse_export_email(msg: EmailMessage) -> tuple[str, str] | None:
+    """-> (job_id, exported_type) for an ExactTarget export notification, else None."""
+    m = _EXPORT_RE.search(msg.body or "")
+    return (m.group("job"), m.group("type").lower()) if m else None
+
+
+def parse_overview_email(msg: EmailMessage) -> tuple[str, SendIdentity] | None:
+    """-> (job_id, identity) for the overview-PDF email, else None.
+
+    Requires the canonical subject, a PDF attachment, and a 'for job <n>' body —
+    so the operator's older manual-delivery emails (different subject shape, no
+    such body) are never mistaken for the anchor."""
+    if "engagement tracking report" not in (msg.subject or "").lower():
+        return None
+    if not any(a.filename.lower().endswith(".pdf") for a in msg.attachments):
+        return None
+    jm = _OVERVIEW_JOB_RE.search(msg.body or "")
+    if not jm:
+        return None
+    try:
+        identity = naming.parse_overview_subject(msg.subject)
+    except ValueError:
+        return None
+    return jm.group("job"), identity
 
 
 def _sha(data: bytes) -> str:
@@ -70,21 +112,16 @@ def _sha(data: bytes) -> str:
 
 def _load_state(drop_root: Path) -> dict:
     path = drop_root / STATE_FILE
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {"processed_message_ids": []}
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"processed_message_ids": []}
 
 
 def _save_state(drop_root: Path, state: dict) -> None:
-    (drop_root / STATE_FILE).write_text(
-        json.dumps(state, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    (drop_root / STATE_FILE).write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _save_dedup(drop_folder: Path, att: Attachment, seen: dict[str, str]) -> bool:
-    """Write an attachment unless an identical one (by content hash) is already
-    staged. Returns True if newly written. Different content with the same name
-    is suffixed rather than overwritten (loud-by-data, never clobber)."""
+    """Write an attachment unless an identical one (by content hash) is staged.
+    Different content under the same name is suffixed, never clobbered."""
     digest = _sha(att.data)
     if digest in seen:
         return False
@@ -97,23 +134,23 @@ def _save_dedup(drop_folder: Path, att: Attachment, seen: dict[str, str]) -> boo
     return True
 
 
+@dataclass
+class _Group:
+    msgs: list[EmailMessage] = field(default_factory=list)
+    identity: SendIdentity | None = None
+
+
 def pull_and_stage(
     source: EmailSource,
     label: str,
     drop_root: str | Path,
     *,
-    subject_parser: Callable[[str], naming.SendIdentity] = naming.parse_send_identity,
-    process: Callable[[Path], SendResult] = process_folder,
+    process: Callable[..., SendResult] = process_folder,
     completeness: Callable[[SendResult], tuple[bool, list[str]]] = assess_completeness,
 ) -> list[StagedSend]:
-    """Pull labeled messages, stage per send, process complete sends, and move
-    them to processed/. Idempotent: already-processed message ids are skipped,
-    so re-running never double-files, double-marks, or re-processes (BRIEF §3).
-
-    subject_parser maps an email subject -> SendIdentity. Default assumes the
-    subject carries the 'Client - Season Year Type' form; the real convention is
-    an open operator question (see README Phase 2 notes) and is a one-line swap.
-    """
+    """Pull labeled messages, group by JobID, stage, process complete sends, and
+    move them to processed/. Idempotent: already-processed message ids are
+    skipped, so re-running never double-files, double-marks, or re-processes."""
     drop_root = Path(drop_root)
     inbox = drop_root / "inbox"
     processed_root = drop_root / "processed"
@@ -122,50 +159,65 @@ def pull_and_stage(
     state = _load_state(drop_root)
     done: set[str] = set(state["processed_message_ids"])
 
-    # Group fresh messages by the send they belong to (out-of-order safe).
-    groups: dict[str, list[EmailMessage]] = {}
+    # Group fresh messages by JobID; the overview email supplies the identity.
+    groups: dict[str, _Group] = {}
     for msg in source.fetch_labeled(label):
         if msg.id in done:
             continue
-        identity = subject_parser(msg.subject)
-        groups.setdefault(identity.folder_name, []).append(msg)
+        ov = parse_overview_email(msg)
+        if ov is not None:
+            job_id, identity = ov
+            g = groups.setdefault(job_id, _Group())
+            g.identity = identity
+            g.msgs.append(msg)
+            continue
+        ex = parse_export_email(msg)
+        if ex is not None:
+            job_id, _ = ex
+            groups.setdefault(job_id, _Group()).msgs.append(msg)
+        # else: a labeled email that is neither -> ignored (not a report email).
 
     staged: list[StagedSend] = []
-    for folder_name, msgs in groups.items():
-        drop_folder = inbox / folder_name
-        item = StagedSend(folder_name, drop_folder, [m.id for m in msgs])
+    for job_id, g in groups.items():
+        drop_folder = inbox / f"job_{job_id}"
+        item = StagedSend(job_id, drop_folder, [m.id for m in g.msgs], identity=g.identity)
 
         seen: dict[str, str] = {}
-        for existing in drop_folder.glob("*") if drop_folder.exists() else []:
-            if existing.is_file():
-                seen[_sha(existing.read_bytes())] = existing.name
-        for msg in msgs:
+        if drop_folder.exists():
+            for existing in drop_folder.glob("*"):
+                if existing.is_file():
+                    seen[_sha(existing.read_bytes())] = existing.name
+        for msg in g.msgs:
             for att in msg.attachments:
                 if _save_dedup(drop_folder, att, seen):
                     item.log.append(f"staged {att.filename} (from {msg.id})")
 
-        # Process, then gate on completeness. A still-incomplete send (delayed
-        # arrival) is left pending and its messages are NOT marked done, so the
-        # next pull picks up the rest. A hard processing error also pends.
-        try:
-            item.result = process(drop_folder)
-        except Exception as exc:  # noqa: BLE001 - pending is an expected outcome
-            item.pending_reason = str(exc)
-            item.log.append(f"PENDING (processing error): {exc}")
+        # The overview email (identity + PDF) must have arrived to proceed.
+        if g.identity is None:
+            item.pending_reason = "awaiting overview-PDF email (identity) for this JobID"
+            item.log.append(f"PENDING: {item.pending_reason}")
             staged.append(item)
             continue
 
-        complete, missing = completeness(item.result)
-        if not complete:
+        try:
+            item.result = process(drop_folder, g.identity)
+        except Exception as exc:  # noqa: BLE001 - pending is an expected outcome
+            item.pending_reason = f"processing error: {exc}"
+            item.log.append(f"PENDING ({item.pending_reason})")
+            staged.append(item)
+            continue
+
+        ok, missing = completeness(item.result)
+        if not ok:
             item.pending_reason = f"incomplete: missing {missing}"
             item.log.append(f"PENDING (not yet complete): missing {missing}")
             staged.append(item)
             continue
 
-        for msg in msgs:
+        for msg in g.msgs:
             source.mark_processed(msg.id)
             done.add(msg.id)
-        dest = processed_root / folder_name
+        dest = processed_root / g.identity.folder_name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists():
             shutil.rmtree(dest)

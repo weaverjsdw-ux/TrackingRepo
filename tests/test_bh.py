@@ -61,13 +61,15 @@ def test_resolve_prefers_request_file(synthetic_send):
     assert result.warning is None  # request (3) agrees with derive (3)
 
 
-def test_resolve_request_overrides_and_warns_on_disagreement(synthetic_send):
-    counts = link_counts(synthetic_send / "export_1003.csv")  # derives to 3
-    result = bh.resolve_bh(request_count=28, request_link="https://x/landing",
+def test_resolve_trusts_request_export_even_when_master_differs(synthetic_send):
+    # Operator decision: the request export is authoritative; a differing master
+    # derive does NOT override it or raise a warning (they differ by design).
+    counts = link_counts(synthetic_send / "export_1003.csv")  # would derive to 3
+    result = bh.resolve_bh(request_count=6, request_link="https://x/requestguide",
                            master_link_counts=counts)
-    assert result.bh == 28
+    assert result.bh == 6
     assert result.method == "request-file"
-    assert result.warning and "disagrees" in result.warning
+    assert result.warning is None
 
 
 def test_resolve_falls_back_to_derive_when_no_request_file(synthetic_send):

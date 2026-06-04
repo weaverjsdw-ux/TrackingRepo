@@ -47,12 +47,16 @@ class SendResult:
     log: list[str] = field(default_factory=list)
 
 
-def process_folder(folder: str | Path) -> SendResult:
+def process_folder(folder: str | Path, identity: naming.SendIdentity | None = None) -> SendResult:
     folder = Path(folder)
     if not folder.is_dir():
         raise FileNotFoundError(f"Send folder not found: {folder}")
 
-    identity = naming.parse_send_identity(folder.name)
+    # Identity normally comes from the folder name (Phase 1 folder-based use); the
+    # Gmail intake passes it explicitly (parsed from the overview-PDF subject),
+    # because the staging folder is keyed by JobID, not by the send name.
+    if identity is None:
+        identity = naming.parse_send_identity(folder.name)
     result = SendResult(identity=identity)
     result.log.append(f"Send: {identity.prefix}  (folder: {folder.name})")
 

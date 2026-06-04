@@ -121,7 +121,18 @@ class GmailSource:
         headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
         subject = headers.get("subject", "")
         attachments = tuple(self._extract_attachments(message_id, msg["payload"]))
-        return EmailMessage(id=message_id, subject=subject, attachments=attachments)
+        body = self._extract_text(msg["payload"]) or msg.get("snippet", "")
+        return EmailMessage(id=message_id, subject=subject, attachments=attachments, body=body)
+
+    def _extract_text(self, payload: dict) -> str:
+        """Concatenate text/plain parts (for parsing Exported Type / JobID)."""
+        chunks: list[str] = []
+        for part in _walk_parts(payload):
+            if part.get("mimeType") == "text/plain":
+                data = part.get("body", {}).get("data")
+                if data:
+                    chunks.append(base64.urlsafe_b64decode(data).decode("utf-8", "replace"))
+        return "\n".join(chunks)
 
     def _extract_attachments(self, message_id: str, payload: dict) -> list[Attachment]:
         out: list[Attachment] = []
