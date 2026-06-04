@@ -16,6 +16,10 @@ clients.csv
 # raw export_/sd_ naming so they exercise the same code paths.
 !tests/fixtures/synthetic/**
 
+# Local intake working dirs (real attachments = PII) — never commit.
+drop/
+**/drop/
+
 # Secrets / credentials (Gmail, Sheets service account) — never committed.
 .env
 *.env
