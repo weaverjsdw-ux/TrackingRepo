@@ -19,9 +19,17 @@ class ClientNotFound(KeyError):
 @dataclass(frozen=True)
 class ClientInfo:
     client: str
-    hipaa: bool
+    hipaa: bool | None  # True=yes, False=no, None="?" (needs operator review)
     pc_name: str
     pc_email: str
+
+
+# Accepted values for the hipaa column. "?" (and synonyms) => None = review.
+_HIPAA_VALUES = {
+    "yes": True, "y": True,
+    "no": False, "n": False,
+    "?": None, "unknown": None, "review": None, "tbd": None,
+}
 
 
 def _norm(s: str) -> str:
@@ -41,14 +49,14 @@ def load_clients(path: str | Path) -> dict[str, ClientInfo]:
             if not client:
                 continue
             hipaa_raw = _norm(row.get("hipaa", ""))
-            if hipaa_raw not in {"yes", "no"}:
+            if hipaa_raw not in _HIPAA_VALUES:
                 raise ValueError(
                     f"clients.csv: client {client!r} has hipaa={row.get('hipaa')!r} "
-                    f"(must be 'yes' or 'no')."
+                    f"(must be 'yes', 'no', or '?')."
                 )
             out[_norm(client)] = ClientInfo(
                 client=client,
-                hipaa=(hipaa_raw == "yes"),
+                hipaa=_HIPAA_VALUES[hipaa_raw],
                 pc_name=(row.get("pc_name") or "").strip(),
                 pc_email=(row.get("pc_email") or "").strip(),
             )

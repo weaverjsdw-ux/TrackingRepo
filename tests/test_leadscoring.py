@@ -10,6 +10,7 @@ CSV = (
     "# comment line\n"
     "Bradley University,no,,\n"
     "Mercy Hospital,yes,Dana Coordinator,dana@mercy.org\n"
+    "Riverside Research,?,,\n"
 )
 
 
@@ -146,6 +147,23 @@ def test_run_dry_run_sends_nothing(tmp_path):
     snd = FakeSender()
     res = leadscoring.run(src, "lead-scoring", snd, _clients(tmp_path), commit=False)
     assert res[0].sent is False
+    assert snd.sent == [] and src.marked == []
+
+
+def test_route_review_for_question_mark(tmp_path):
+    cm = _clients(tmp_path)
+    assert clients.lookup(cm, "Riverside Research").hipaa is None
+    ls = leadscoring.parse_lead_scoring_email(
+        _ls_email("Lead Scoring - Riverside Research Spring 2026 eNL", "sd_Riverside Research - LS.csv"))
+    assert leadscoring.route(ls, cm).kind == "review"
+
+
+def test_run_skips_review_client(tmp_path):
+    src = FakeSource([EmailMessage("r1", "Lead Scoring - Riverside Research Spring 2026 eNL",
+                                   (Attachment("sd_Riverside Research - LS.csv", b"x"),), "")])
+    snd = FakeSender()
+    res = leadscoring.run(src, "lead-scoring", snd, _clients(tmp_path), commit=True)
+    assert res[0].sent is False and "?" in res[0].skipped_reason
     assert snd.sent == [] and src.marked == []
 
 

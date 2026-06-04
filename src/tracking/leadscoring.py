@@ -38,7 +38,7 @@ class LeadScoring:
 
 @dataclass(frozen=True)
 class Route:
-    kind: str  # "notify-kathryn" | "hipaa"
+    kind: str  # "notify-kathryn" | "hipaa" | "review"
     lead: LeadScoring
     client_info: ClientInfo
 
@@ -67,7 +67,13 @@ def route(lead: LeadScoring, clients_map: dict[str, ClientInfo]) -> Route:
     """Decide where a lead-scoring report goes. Raises clients.ClientNotFound if
     the client is absent from clients.csv (never guesses HIPAA status)."""
     info = clients.lookup(clients_map, lead.identity.client)
-    return Route(kind=("hipaa" if info.hipaa else "notify-kathryn"), lead=lead, client_info=info)
+    if info.hipaa is None:
+        kind = "review"            # marked '?' in clients.csv -> confirm before sending
+    elif info.hipaa:
+        kind = "hipaa"            # deferred branch
+    else:
+        kind = "notify-kathryn"
+    return Route(kind=kind, lead=lead, client_info=info)
 
 
 @runtime_checkable
@@ -136,6 +142,11 @@ def run(
         res.kind = r.kind
         if r.kind == "hipaa":
             res.skipped_reason = "HIPAA branch deferred (not built this round)"
+            res.log.append("SKIP: " + res.skipped_reason)
+            results.append(res)
+            continue
+        if r.kind == "review":
+            res.skipped_reason = "HIPAA status is '?' in clients.csv — confirm yes/no before sending"
             res.log.append("SKIP: " + res.skipped_reason)
             results.append(res)
             continue
