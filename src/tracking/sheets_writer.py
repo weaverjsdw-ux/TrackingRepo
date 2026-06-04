@@ -63,7 +63,8 @@ class GoogleSheetsWriter:
     def get_values(self) -> list[list[str]]:
         resp = (
             self._service().spreadsheets().values()
-            .get(spreadsheetId=self._spreadsheet_id, range=self._tab)
+            .get(spreadsheetId=self._spreadsheet_id, range=self._tab,
+                 valueRenderOption="UNFORMATTED_VALUE")
             .execute()
         )
         return resp.get("values", [])

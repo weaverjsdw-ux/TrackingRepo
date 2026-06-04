@@ -39,18 +39,23 @@ def _to_int(s: str) -> int:
     return int(s.replace(",", ""))
 
 
-def parse_summary(pdf_path: str | Path) -> dict[str, int]:
-    """Return {metric label -> count} for every metric found in the PDF summary."""
+def parse_summary(pdf_path: str | Path) -> dict[str, object]:
+    """Return {label -> value} for the PDF summary: integer counts (Total Sent,
+    Delivered, Total Opens, ...) plus the text 'Subject' (newsletter subject)."""
     import pdfplumber
 
     with pdfplumber.open(pdf_path) as pdf:
         text = "\n".join((p.extract_text() or "") for p in pdf.pages)
 
-    out: dict[str, int] = {}
+    out: dict[str, object] = {}
     for label, pattern in _PATTERNS.items():
         m = re.search(pattern, text)
         if not m:
             continue
         # Unique Clicks pattern captures (total, unique); take the last group.
         out[label] = _to_int(m.group(m.lastindex))
+    # The newsletter subject line (text), e.g. "Subject :Giving Thought - Spring 2026".
+    subj = re.search(r"Subject\s*:\s*(.+)", text)
+    if subj:
+        out["Subject"] = subj.group(1).strip()
     return out

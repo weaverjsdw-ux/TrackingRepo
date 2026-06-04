@@ -88,4 +88,5 @@ def test_overview_pdf_summary_parses_real_layout(real_send):
         "Unsubscribes": 32,
         "Delivered": 7192,
         "Total Opens": 3665,
+        "Subject": "Giving Thought - Spring 2026",
     }

@@ -39,6 +39,8 @@ from .pipeline import SendResult
 #   ("file", <metric>)  = result.metrics[<metric>] (a row count)
 #   ("pdf",  <metric>)  = pdf_summary[<metric>]
 #   ("bh",   None)      = result.metrics["BH"] (special: 0 fails loud, fallback flagged)
+#   ("rate", <metric>)  = result.metrics[<metric>] / pdf_summary["Delivered"] (decimal)
+#   ("text", <key>)     = pdf_summary[<key>] (e.g. the newsletter Subject)
 COLUMN_SOURCES = {
     "# Total sent": ("file", "Total Sent"),
     "# Delivered": ("pdf", "Delivered"),
@@ -46,6 +48,11 @@ COLUMN_SOURCES = {
     "Booklet landing page unique clicks": ("bh", None),
     "# Total opens": ("pdf", "Total Opens"),
     "# Unique opens": ("file", "Unique Opens"),
+    # Rates are stored as decimals (the sheet formats them as %); computed the
+    # same way the sheet's existing rows are (verified): metric / Delivered.
+    "Unique open rate %": ("rate", "Unique Opens"),
+    "Unique click-through %": ("rate", "Unique Clicks"),
+    "Subject line": ("text", "Subject"),
 }
 
 # Cross-check: PDF metric -> the file metric that must exist if the PDF says >0.
@@ -123,11 +130,28 @@ def build_sheet_plan(result: SendResult, pdf_summary: dict[str, int]) -> SheetPl
                     f"{header}={bh_val} via FALLBACK ({result.bh.method}) — no request "
                     f"export present; verify the booklet link before relying on it."
                 )
+        elif kind == "rate":
+            delivered = pdf_summary.get("Delivered")
+            num = result.metrics.get(key)
+            if delivered is None:
+                raise SheetError(f"Cannot compute {header!r}: overview PDF has no Delivered.")
+            if num is None:
+                raise SheetError(f"Cannot compute {header!r}: {key} file missing.")
+            if delivered == 0:
+                raise SheetError(f"Cannot compute {header!r}: Delivered is 0.")
+            plan.values[header] = round(num / delivered, 5)
+        elif kind == "text":
+            value = pdf_summary.get(key)
+            if not value:
+                raise SheetError(f"No value for {header!r}: overview PDF has no {key}.")
+            plan.values[header] = value
     return plan
 
 
 def _norm(s: str) -> str:
-    return str(s).strip().lower()
+    # Collapse all whitespace (incl. embedded newlines in headers like
+    # 'Unique\nopen rate %') so header matching is whitespace-insensitive.
+    return re.sub(r"\s+", " ", str(s).strip().lower())
 
 
 def _month_to_season(month: int) -> str | None:
@@ -205,11 +229,13 @@ def write_send(
     written: dict[str, tuple[int, int]] = {}
     for header, value in plan.values.items():
         col = col_of[header]
-        current = _cell(grid, row_idx, col)
-        if fill_blanks_only and current.strip() and current.strip() != str(value):
-            plan.warnings.append(
-                f"{header}: cell already holds {current!r} (≠ {value}); left as-is."
-            )
+        current = str(_cell(grid, row_idx, col)).strip()  # cells may be int/float/str
+        if fill_blanks_only and current:
+            # Never touch a non-blank cell; only flag if it disagrees with us.
+            if current != str(value):
+                plan.warnings.append(
+                    f"{header}: cell already holds {current!r} (≠ {value}); left as-is."
+                )
             continue
         writer.update_cell(row_idx, col, value)
         written[header] = (row_idx, col)

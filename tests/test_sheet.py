@@ -10,9 +10,12 @@ from tracking import overview, pipeline
 from tracking.sheet import SheetError, build_sheet_plan, write_send
 
 # Real header labels (row index 2 on the live sheet). Client in col B(=1).
+# 'Unique\nopen rate %' intentionally carries a newline (as the live sheet does)
+# to exercise whitespace-insensitive header matching.
 HEAD = ["", "Client", "Type", "Issue #",
         "# Total sent", "# Delivered", "# Unique clicks",
         "Booklet landing page unique clicks", "# Total opens", "# Unique opens",
+        "Unique\nopen rate %", "Unique click-through %", "Subject line",
         "Actual ... send date"]
 BANNER = [""] * len(HEAD)
 
@@ -30,9 +33,10 @@ class FakeSheet:
         self.grid[row][col] = str(value)
 
 
-def _row(client, type_, send_date="", **cells):
+def _row(client, type_, send_date=""):
     r = [""] * len(HEAD)
-    r[1], r[2], r[10] = client, type_, send_date
+    r[1], r[2] = client, type_
+    r[HEAD.index("Actual ... send date")] = send_date
     return r
 
 
@@ -51,6 +55,7 @@ def test_parse_overview_summary(synthetic_send):
     s = overview.parse_summary(synthetic_send / "Job_770001_Overview_20260901.pdf")
     assert s["Total Sent"] == 6 and s["Unique Opens"] == 4 and s["Unique Clicks"] == 9
     assert s["Delivered"] == 4 and s["Total Opens"] == 5
+    assert s["Subject"] == "Northshore Fall Newsletter"
 
 
 def test_build_plan_maps_to_sheet_columns(synthetic_send):
@@ -62,6 +67,9 @@ def test_build_plan_maps_to_sheet_columns(synthetic_send):
         "Booklet landing page unique clicks": 3,
         "# Total opens": 5,
         "# Unique opens": 4,
+        "Unique open rate %": 1.0,            # 4 unique opens / 4 delivered
+        "Unique click-through %": 2.25,       # 9 unique clicks / 4 delivered (synthetic)
+        "Subject line": "Northshore Fall Newsletter",
     }
 
 
