@@ -86,4 +86,6 @@ def test_overview_pdf_summary_parses_real_layout(real_send):
         "Unique Opens": 2146,
         "Unique Clicks": 180,
         "Unsubscribes": 32,
+        "Delivered": 7192,
+        "Total Opens": 3665,
     }

@@ -142,9 +142,11 @@ def _write_overview_pdf(name: str) -> None:
         "Hard Bounce: 2",
         "Soft Bounce: 0",
         "Block Bounce: 0",
+        "Delivered: 4",
+        "Total Opens: 5",
         "Unique Opens:4",
         "Total Unique",
-        "Opens 4 4",
+        "Opens 5 4",
         "Clicks 9 9",
         "Unsubscribes - 1",
     ]

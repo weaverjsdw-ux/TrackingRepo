@@ -29,6 +29,9 @@ _PATTERNS = {
     "Unique Clicks": r"\bClicks\s+([\d,]+)\s+([\d,]+)",
     # Inbox Activity table row "Unsubscribes - <unique>".
     "Unsubscribes": r"Unsubscribes\s+-?\s*([\d,]+)",
+    # Written straight to the Sheet (no row-count file exists for these):
+    "Delivered": r"Delivered\s*:\s*([\d,]+)",
+    "Total Opens": r"Total Opens\s*:\s*([\d,]+)",
 }
 
 
