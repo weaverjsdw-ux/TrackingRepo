@@ -6,7 +6,6 @@ real_data/
 *export_*.csv
 Job_*_Overview_*.pdf
 sd_*.csv
-clients.csv
 # Real finished-file naming convention "<Client> <Season> <Year> <Type> - *.csv"
 * eNL - *.csv
 * ePC - *.csv
