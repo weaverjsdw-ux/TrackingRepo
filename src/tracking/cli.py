@@ -50,9 +50,8 @@ def cmd_authorize(_args) -> int:
 
 
 def cmd_pull(args) -> int:
-    from . import intake
+    from . import intake, overview, pipeline
     from .sheet import build_sheet_plan
-    from . import overview
     from .identify import FileType
 
     label = os.environ.get("GMAIL_LABEL", "tracking-reports")
@@ -71,11 +70,12 @@ def cmd_pull(args) -> int:
             print(f"  -> PENDING: {s.pending_reason}")
             continue
         print(f"  metrics: {s.result.metrics}")
-        # Dry-run preview of the Sheet values (no write here).
-        pdf = next((p.source for p in s.result.planned if p.type is FileType.OVERVIEW_PDF), None)
+        # Re-read from the final (moved) folder so PDF/file paths are valid.
+        res = pipeline.process_folder(s.drop_folder, s.identity)
+        pdf = next((p.source for p in res.planned if p.type is FileType.OVERVIEW_PDF), None)
         if pdf is not None:
             try:
-                plan = build_sheet_plan(s.result, overview.parse_summary(pdf))
+                plan = build_sheet_plan(res, overview.parse_summary(pdf))
                 print(f"  sheet values (preview): {plan.values}")
                 for w in plan.warnings:
                     print(f"  WARN: {w}")
