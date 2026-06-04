@@ -51,39 +51,40 @@ print("\n".join(r.log))   # auditable per-run log
 4. **Parser quirks hit** — UTF-8 BOM, quoted embedded commas, embedded newlines, diacritics, and per-recipient `utm_/sfmc_id` query params on click URLs (stripped before grouping).
 5. **Harden next** — (a) bounce sub-typing (Hard/Soft/Block share a header — needs a Bounce-Reason content rule); (b) multi-booklet sends (≤3 links) currently fail loud by design; (c) overview-PDF value extraction; (d) a completeness gate (which files make a send "ready") to drive Phase 2 pending/delayed handling; (e) confirm the "Request Your" label doesn't vary by client.
 
-## Phase 2 — Gmail intake (in progress)
+## Phase 2 — Gmail intake (live-verified)
 
-The orchestration core (`intake.py`) is built and tested against a fake source —
-grouping, staging, content-hash dedup, idempotent re-runs, and the delayed-
-arrival *pending* path all pass without any credentials. What remains is the
-real `EmailSource` adapter (`gmail_source.py`), which is **blocked on operator
-decisions**: Gmail auth mode (OAuth user-consent vs Workspace service account),
-the exact label name, the report-email **subject convention** (how Client /
-Season / Year / Type are encoded — currently the default parser assumes the
-`Client - Season Year Type` folder-name form), and the mark-processed strategy
-(remove label / add a done label / archive). See `.env.example`.
+How reports actually arrive (confirmed against the live inbox): ExactTarget
+sends one "Email Export" notification per file (body carries `Exported Type` and
+`JobID`), and the operator's "Tracking Export" email carries the identity in its
+subject (`<Client> <Season> <Year> <Type> - Engagement Tracking Report`) plus the
+overview PDF. So a send is assembled by **JobID** (all of a send's emails share
+one), with identity from the overview-PDF email. `intake.py` groups by JobID,
+stages + content-hash dedups attachments, runs the pipeline, gates on
+completeness, then marks messages processed (removes the label) and moves the
+send to `processed/`. Verified live: it pulled the real inbox and assembled the
+Bradley send (JobID 687422).
 
-Decisions locked: **OAuth user-consent** auth; subject = `Client - Season Year Type`;
-mark-processed = **remove the intake label**; completeness gate = core (Total
-Sent + Unique Opens + Unique Clicks + overview PDF), other metrics optional.
+Locked: **OAuth user-consent**; identity from the overview-PDF subject; the two
+identical "click" exports are told apart by distinct-link count (master vs
+request); mark-processed = **remove the label**; completeness = core (Total Sent
++ Unique Opens + Unique Clicks + overview PDF).
 
-## Phase 3 — Sheet write-back (logic green; live run pending creds)
+## Phase 3 — Sheet write-back (live-verified)
 
-Matching (client row × metric-header column) and the safety cross-check are
-fully tested offline with a `FakeSheet`. Before any write:
-- a metric the **overview PDF** reports as nonzero but whose file is **absent
-  fails loud** — never written as a silent 0;
-- the three identical-header bounce files are **sub-typed** by matching their row
-  counts to the PDF's Hard/Soft/Block totals;
-- **BH via the clicks-derive fallback is flagged**, and **BH == 0 fails loud**;
-- file vs PDF count differences (snapshot drift) **warn**, and the file count is
-  written.
+Mapped to the live `2026 Print Status Report` tab (headers on row 3; Client in
+col B). Writes six columns: `# Total sent`, `# Delivered` (PDF), `# Unique
+clicks`, `Booklet landing page unique clicks` (= BH, the request export),
+`# Total opens` (PDF), `# Unique opens`. Safety:
+- **row match** = Client + Type; if >1, tiebreak by the AJ send-date month →
+  season; still ambiguous → **fail loud** with the candidate rows;
+- **fill blanks only** — a cell already holding a different value is skipped and
+  flagged, never overwritten;
+- a metric the **overview PDF** reports nonzero but whose source is absent **fails
+  loud** (no silent 0); **BH == 0 fails loud**; BH via the clicks-derive fallback
+  is **flagged**; file-vs-PDF drift **warns** and writes the file count.
 
-Remaining to go live: the operator shares a **copy of the sheet** and adds the
-tool's **service account as Editor**; the coder then confirms the **live header
-labels** (matched by text, with a `header_overrides` hook for any that differ)
-and the **client-column** convention. Adapter: `sheets_writer.GoogleSheetsWriter`
-(`pip install -e .[sheets]`).
+Verified by a real write to the trial copy: Bradley eNL → **row 636**, all six
+cells. Adapter: `sheets_writer.GoogleSheetsWriter` (`pip install -e .[sheets]`).
 
 ## Repo & CI
 
