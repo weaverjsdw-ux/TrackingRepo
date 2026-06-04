@@ -120,6 +120,28 @@ def cmd_write(args) -> int:
     return rc
 
 
+def cmd_leadscoring(args) -> int:
+    from . import clients as clients_mod
+    from . import leadscoring
+
+    label = os.environ.get("LEADSCORING_LABEL", "lead-scoring")
+    cm = clients_mod.load_clients(os.environ.get("CLIENTS_CSV", "clients.csv"))
+    src = _gmail_source()  # GmailSource is both reader and sender
+    results = leadscoring.run(src, label, src, cm, commit=args.commit)
+    if not results:
+        print("No lead-scoring emails to process.")
+        return 0
+    for r in results:
+        print(f"\n=== {r.subject} ===")
+        for line in r.log:
+            print(f"  {line}")
+        if r.skipped_reason:
+            print(f"  -> SKIPPED: {r.skipped_reason}")
+    if not args.commit:
+        print("\n(dry-run — nothing sent. Re-run with --commit to send.)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(prog="tracking.cli", description=__doc__)
@@ -129,6 +151,9 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.add_parser("write", help="write processed sends to the Sheet (dry-run unless --commit)")
     w.add_argument("--commit", action="store_true", help="actually write (default is dry-run)")
     w.set_defaults(func=cmd_write)
+    ls = sub.add_parser("leadscoring", help="route labeled lead-scoring emails (dry-run unless --commit)")
+    ls.add_argument("--commit", action="store_true", help="actually send (default is dry-run)")
+    ls.set_defaults(func=cmd_leadscoring)
 
     args = parser.parse_args(argv)
     return args.func(args)

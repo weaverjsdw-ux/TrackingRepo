@@ -95,3 +95,72 @@ def test_route_unknown_client_fails_loud(tmp_path):
         _ls_email("Lead Scoring - Nobody College Spring 2026 eNL", "sd_Nobody College - Lead Scoring.csv"))
     with pytest.raises(clients.ClientNotFound):
         leadscoring.route(ls, _clients(tmp_path))
+
+
+# --- compose + run (fake source/sender; NO real email) ---
+
+class FakeSource:
+    def __init__(self, msgs):
+        self._m = msgs
+        self.marked = []
+
+    def fetch_labeled(self, label):
+        return [m for m in self._m if m.id not in self.marked]
+
+    def mark_processed(self, mid):
+        self.marked.append(mid)
+
+
+class FakeSender:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, to, subject, body, attachments=(), cc=None):
+        self.sent.append((to, subject, body, [a.filename for a in attachments], cc))
+        return "fake-msg-id"
+
+
+def test_compose_kathryn_email(tmp_path):
+    ls = leadscoring.parse_lead_scoring_email(_ls_email("Lead Scoring - Bradley University Spring 2026 eNL"))
+    email = leadscoring.compose_kathryn_email(leadscoring.route(ls, _clients(tmp_path)))
+    assert email.to == "kathryn.baugh@pentera.com"
+    assert email.subject == "Lead Scoring - Bradley University Spring 2026 eNL"
+    assert email.body == ""
+    assert email.attachments[0].filename.startswith("sd_")
+
+
+def test_run_sends_non_hipaa_on_commit(tmp_path):
+    src = FakeSource([_ls_email("Lead Scoring - Bradley University Spring 2026 eNL")])
+    snd = FakeSender()
+    res = leadscoring.run(src, "lead-scoring", snd, _clients(tmp_path), commit=True)
+    assert res[0].sent and res[0].kind == "notify-kathryn"
+    to, subj, body, atts, cc = snd.sent[0]
+    assert to == "kathryn.baugh@pentera.com"
+    assert subj == "Lead Scoring - Bradley University Spring 2026 eNL"
+    assert atts == ["sd_Bradley University - Lead Scoring20260514.csv"]
+    assert src.marked == ["m1"]
+
+
+def test_run_dry_run_sends_nothing(tmp_path):
+    src = FakeSource([_ls_email("Lead Scoring - Bradley University Spring 2026 eNL")])
+    snd = FakeSender()
+    res = leadscoring.run(src, "lead-scoring", snd, _clients(tmp_path), commit=False)
+    assert res[0].sent is False
+    assert snd.sent == [] and src.marked == []
+
+
+def test_run_skips_hipaa_and_unknown(tmp_path):
+    msgs = [
+        EmailMessage("h1", "Lead Scoring - Mercy Hospital Spring 2026 eNL",
+                     (Attachment("sd_Mercy Hospital - Lead Scoring.csv", b"x"),), ""),
+        EmailMessage("u1", "Lead Scoring - Nobody College Spring 2026 eNL",
+                     (Attachment("sd_Nobody College - Lead Scoring.csv", b"x"),), ""),
+    ]
+    src = FakeSource(msgs)
+    snd = FakeSender()
+    res = leadscoring.run(src, "lead-scoring", snd, _clients(tmp_path), commit=True)
+    kinds = {r.subject: (r.sent, r.skipped_reason) for r in res}
+    assert kinds["Lead Scoring - Mercy Hospital Spring 2026 eNL"][0] is False    # HIPAA deferred
+    assert "HIPAA" in kinds["Lead Scoring - Mercy Hospital Spring 2026 eNL"][1]
+    assert kinds["Lead Scoring - Nobody College Spring 2026 eNL"][0] is False    # unknown client
+    assert snd.sent == [] and src.marked == []                                  # nothing sent/marked

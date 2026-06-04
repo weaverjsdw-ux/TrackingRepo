@@ -22,9 +22,13 @@ from pathlib import Path
 
 from .intake import Attachment, EmailMessage
 
-# Read-only would be enough to fetch, but removing the label on mark-processed
-# needs modify scope.
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+# modify = read + remove labels (mark-processed); send = send notifications (Phase 4).
+# NOTE: adding gmail.send means the operator must re-run `authorize` once (delete
+# secrets/token.json first) so the new consent includes the send scope.
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+]
 
 
 class GmailSource:
@@ -61,6 +65,27 @@ class GmailSource:
             userId="me", id=message_id,
             body={"removeLabelIds": [self._label_id(label)]},
         ).execute()
+
+    # --- EmailSender interface (Phase 4) --------------------------------------
+
+    def send(self, to, subject, body, attachments=(), cc=None) -> str:
+        """Send an email (optionally with attachments). Requires the gmail.send
+        scope; returns the sent message id."""
+        import base64
+        from email.message import EmailMessage as _Mime
+
+        mime = _Mime()
+        mime["To"] = to
+        if cc:
+            mime["Cc"] = cc
+        mime["Subject"] = subject
+        mime.set_content(body or "")
+        for att in attachments:
+            mime.add_attachment(att.data, maintype="application",
+                                subtype="octet-stream", filename=att.filename)
+        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+        sent = self._svc().users().messages().send(userId="me", body={"raw": raw}).execute()
+        return sent["id"]
 
     # --- internals -------------------------------------------------------------
 
