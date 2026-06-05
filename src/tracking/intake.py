@@ -102,20 +102,31 @@ def parse_export_email(msg: EmailMessage) -> tuple[str, str] | None:
 def parse_overview_email(msg: EmailMessage) -> tuple[str, SendIdentity] | None:
     """-> (job_id, identity) for the overview-PDF email, else None.
 
-    Requires the canonical subject, a PDF attachment, and a 'for job <n>' body —
-    so the operator's older manual-delivery emails (different subject shape, no
-    such body) are never mistaken for the anchor."""
-    if "engagement tracking report" not in (msg.subject or "").lower():
-        return None
-    if not any(a.filename.lower().endswith(".pdf") for a in msg.attachments):
-        return None
+    Identified by the 'for job <n>' body + a PDF attachment (distinctive to the
+    'Tracking Export' system email; the operator's older personal emails don't
+    have that body). The identity is read FROM THE PDF CONTENT (its 'Name :'
+    line), so the operator does NOT need to title the email subject. Falls back
+    to a titled subject if the PDF can't be read."""
     jm = _OVERVIEW_JOB_RE.search(msg.body or "")
     if not jm:
         return None
-    try:
-        identity = naming.parse_overview_subject(msg.subject)
-    except ValueError:
+    pdf = next((a for a in msg.attachments if a.filename.lower().endswith(".pdf")), None)
+    if pdf is None:
         return None
+
+    identity: SendIdentity | None = None
+    from . import overview  # local import to avoid any import cycle
+    try:
+        name = overview.parse_summary(pdf.data).get("Name")  # 'Client - Season Year Type'
+        if name:
+            identity = naming.parse_send_identity(str(name))
+    except Exception:  # noqa: BLE001 - fall back to the subject below
+        identity = None
+    if identity is None:
+        try:
+            identity = naming.parse_overview_subject(msg.subject or "")
+        except ValueError:
+            return None
     return jm.group("job"), identity
 
 

@@ -39,12 +39,19 @@ def _to_int(s: str) -> int:
     return int(s.replace(",", ""))
 
 
-def parse_summary(pdf_path: str | Path) -> dict[str, object]:
+def parse_summary(pdf_path: str | Path | bytes) -> dict[str, object]:
     """Return {label -> value} for the PDF summary: integer counts (Total Sent,
-    Delivered, Total Opens, ...) plus the text 'Subject' (newsletter subject)."""
+    Delivered, Total Opens, ...) plus text fields 'Subject' (newsletter subject)
+    and 'Name' (the send identity, e.g. 'Bradley University - Spring 2026 eNL').
+
+    Accepts a file path or the PDF bytes (so an email attachment can be parsed
+    in memory)."""
+    import io
+
     import pdfplumber
 
-    with pdfplumber.open(pdf_path) as pdf:
+    src = io.BytesIO(pdf_path) if isinstance(pdf_path, (bytes, bytearray)) else pdf_path
+    with pdfplumber.open(src) as pdf:
         text = "\n".join((p.extract_text() or "") for p in pdf.pages)
 
     out: dict[str, object] = {}
@@ -54,8 +61,11 @@ def parse_summary(pdf_path: str | Path) -> dict[str, object]:
             continue
         # Unique Clicks pattern captures (total, unique); take the last group.
         out[label] = _to_int(m.group(m.lastindex))
-    # The newsletter subject line (text), e.g. "Subject :Giving Thought - Spring 2026".
-    subj = re.search(r"Subject\s*:\s*(.+)", text)
+    # Text fields. "Name :" is the send identity; "Subject :" is the newsletter subject.
+    name = re.search(r"(?m)^\s*Name\s*:\s*(.+?)\s*$", text)
+    if name:
+        out["Name"] = name.group(1).strip()
+    subj = re.search(r"(?m)^\s*Subject\s*:\s*(.+?)\s*$", text)
     if subj:
         out["Subject"] = subj.group(1).strip()
     return out

@@ -138,6 +138,7 @@ def _write_overview_pdf(name: str) -> None:
     lines = [
         "Summary",
         "Engagement Tracking Report Overview",
+        "Name :Northshore College - Fall 2026 eNL",
         "Subject :Northshore Fall Newsletter",
         "Total Sent:6",
         "Hard Bounce: 2",
