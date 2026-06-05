@@ -5,6 +5,20 @@ diacritics must not corrupt the row count or field values."""
 from tracking import parse
 
 
+def test_row_count_tolerates_ragged_row(tmp_path):
+    # A row with an unescaped comma (extra field) must NOT crash and must still
+    # be counted (ExactTarget export quirk that strict parsers reject).
+    p = tmp_path / "ragged.csv"
+    p.write_text(
+        "Subscriber Key,Email,Name\n"
+        "a,a@x.org,Smith\n"
+        "b,b@x.org,Doe, Jr\n"          # extra comma -> 4 fields
+        "c,c@x.org,Lee\n",
+        encoding="utf-8",
+    )
+    assert parse.row_count(p) == 3
+
+
 def test_row_count_ignores_bom_and_embedded_newline(synthetic_send):
     # 6 data rows even though one Account_Name field contains an embedded newline
     # and the file starts with a UTF-8 BOM.
