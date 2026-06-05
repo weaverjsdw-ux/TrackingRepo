@@ -154,6 +154,13 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", str(s).strip().lower())
 
 
+def _client_key(s: str) -> str:
+    """Order/punctuation-insensitive client key, so the sheet's 'Rochester,
+    University of' matches the PDF's 'University of Rochester'. Sorted set of
+    alphanumeric word tokens, lowercased."""
+    return " ".join(sorted(re.findall(r"[a-z0-9]+", str(s).lower())))
+
+
 def _month_to_season(month: int) -> str | None:
     for season, months in _SEASON_MONTHS.items():
         if month in months:
@@ -210,10 +217,10 @@ def write_send(
     if client_col is None or type_col is None:
         raise SheetError(f"Missing Client/Type column (Client={client_col}, Type={type_col}).")
 
-    target_client, target_type = _norm(identity.client), _norm(identity.type)
+    target_client, target_type = _client_key(identity.client), _norm(identity.type)
     matches = [
         r for r in range(len(grid)) if r != header_row
-        and _norm(_cell(grid, r, client_col)) == target_client
+        and _client_key(_cell(grid, r, client_col)) == target_client
         and _norm(_cell(grid, r, type_col)) == target_type
     ]
     if not matches:

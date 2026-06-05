@@ -128,6 +128,16 @@ def test_missing_but_expected_metric_fails_loud(synthetic_send):
         build_sheet_plan(result, summary)
 
 
+def test_client_match_ignores_word_order_and_punctuation():
+    from tracking.naming import SendIdentity
+    from tracking.sheet import SheetPlan
+    ident = SendIdentity("University of Rochester", "Spring", "2026", "eNL")
+    plan = SheetPlan(values={"# Total sent": 5})
+    sheet = FakeSheet(_grid(_row("Rochester, University of", "eNL")))   # sheet's format
+    write_send(sheet, ident, plan)
+    assert sheet.get_values()[3][HEAD.index("# Total sent")] == "5"
+
+
 def test_client_row_not_found_fails_loud(synthetic_send):
     _, plan = _plan(synthetic_send)
     sheet = FakeSheet(_grid(_row("Totally Different College", "eNL")))
