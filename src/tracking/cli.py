@@ -87,9 +87,8 @@ def cmd_pull(args) -> int:
 
 
 def cmd_write(args) -> int:
-    from . import overview, pipeline
+    from . import filing, overview, pipeline
     from .identify import FileType
-    from .naming import parse_send_identity
     from .sheet import build_sheet_plan, write_send
     from .sheets_writer import GoogleSheetsWriter
 
@@ -98,6 +97,9 @@ def cmd_write(args) -> int:
     if not processed.is_dir():
         print(f"No processed sends at {processed}.")
         return 0
+    # Where the renamed report folders are filed (next to the others). Default:
+    # the parent of this project folder (e.g. ...\TRACKINGREPORTS).
+    reports_dir = Path(os.environ.get("REPORTS_DIR", str(Path.cwd().parent)))
     writer = GoogleSheetsWriter(
         spreadsheet_id=os.environ.get("SHEET_ID"),
         tab=os.environ.get("SHEET_TAB", "Sheet1"),
@@ -111,12 +113,20 @@ def cmd_write(args) -> int:
             print(f"{folder.name}: no overview PDF; skipping (cannot cross-check).")
             rc = 1
             continue
-        plan = build_sheet_plan(result, overview.parse_summary(pdf))
+        summary = overview.parse_summary(pdf)
+        plan = build_sheet_plan(result, summary)
         if not args.commit:
             print(f"{folder.name}: DRY-RUN sheet values: {plan.values}")
             continue
         written = write_send(writer, result.identity, plan)
-        print(f"{folder.name}: wrote {len(written)} cells -> {plan.values}")
+        # Create the renamed report folder (idempotent: skip if already filed).
+        out = reports_dir / result.identity.folder_name
+        if out.exists():
+            filed = "report folder exists"
+        else:
+            names = filing.write_renamed(result, summary, out)
+            filed = f"filed {len(names)} renamed files -> {out}"
+        print(f"{folder.name}: wrote {len(written)} cells; {filed}")
     return rc
 
 
