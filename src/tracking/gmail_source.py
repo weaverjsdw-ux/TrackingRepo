@@ -43,11 +43,23 @@ class GmailSource:
 
     # --- EmailSource interface -------------------------------------------------
 
+    # Find report emails BY SENDER directly (no operator Gmail filter needed):
+    # ExactTarget export notifications + the operator's overview-PDF emails.
+    REPORT_QUERY = (
+        '(from:help@exacttarget.com OR '
+        '(from:noreply@memberemail.com subject:"Engagement Tracking Report")) '
+        'newer_than:45d'
+    )
+
     def fetch_labeled(self, label: str) -> list[EmailMessage]:
+        """Return unhandled report emails. We locate them by sender (not by an
+        operator-applied label) and exclude any already marked done (the label is
+        added on mark_processed), so a missing/broken Gmail filter can't stop the
+        pipeline."""
         service = self._svc()
-        label_id = self._label_id(label)
+        q = f"{self.REPORT_QUERY} -label:{label}"
         out: list[EmailMessage] = []
-        req = service.users().messages().list(userId="me", labelIds=[label_id])
+        req = service.users().messages().list(userId="me", q=q)
         while req is not None:
             resp = req.execute()
             for ref in resp.get("messages", []):
@@ -56,11 +68,11 @@ class GmailSource:
         return out
 
     def mark_processed(self, message_id: str) -> None:
-        # Operator decision: remove the intake label (leave the email otherwise).
+        # ADD the label as a 'done' marker so the email is excluded next run.
         label = os.environ.get("GMAIL_LABEL", "tracking-reports")
         self._svc().users().messages().modify(
             userId="me", id=message_id,
-            body={"removeLabelIds": [self._label_id(label)]},
+            body={"addLabelIds": [self._label_id(label)]},
         ).execute()
 
     # --- internals -------------------------------------------------------------
