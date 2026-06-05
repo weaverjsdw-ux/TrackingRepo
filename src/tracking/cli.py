@@ -120,6 +120,14 @@ def cmd_write(args) -> int:
     return rc
 
 
+def cmd_run(args) -> int:
+    """One scheduled cycle: pull new sends, then write them to the Sheet."""
+    from argparse import Namespace
+    rc_pull = cmd_pull(args)
+    rc_write = cmd_write(Namespace(commit=True))
+    return rc_pull or rc_write
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(prog="tracking.cli", description=__doc__)
@@ -129,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.add_parser("write", help="write processed sends to the Sheet (dry-run unless --commit)")
     w.add_argument("--commit", action="store_true", help="actually write (default is dry-run)")
     w.set_defaults(func=cmd_write)
+    sub.add_parser("run", help="one cycle for scheduling: pull + write to the Sheet").set_defaults(func=cmd_run)
 
     args = parser.parse_args(argv)
     return args.func(args)

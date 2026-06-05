@@ -18,6 +18,8 @@ sd_*.csv
 # Local intake working dirs (real attachments = PII) — never commit.
 drop/
 **/drop/
+# Per-run logs (may contain client names/counts).
+logs/
 
 # Secrets / credentials (Gmail, Sheets service account) — never committed.
 .env
