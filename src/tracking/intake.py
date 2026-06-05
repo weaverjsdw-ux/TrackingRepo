@@ -42,10 +42,23 @@ _EXPORT_RE = re.compile(
 _OVERVIEW_JOB_RE = re.compile(r"for job\s*(?P<job>\d+)", re.IGNORECASE)
 
 
-@dataclass(frozen=True)
 class Attachment:
-    filename: str
-    data: bytes
+    """An email attachment. `data` may be eager (passed in) or lazy (fetched via
+    `loader` only when first accessed) — so the puller can skip downloading the
+    bytes for sends it won't process (e.g. no overview PDF yet)."""
+
+    def __init__(self, filename: str, data: bytes | None = None, *, loader=None):
+        self.filename = filename
+        self._data = data
+        self._loader = loader
+
+    @property
+    def data(self) -> bytes:
+        if self._data is None and self._loader is not None:
+            self._data = self._loader()
+        if self._data is None:
+            raise ValueError(f"Attachment {self.filename!r} has no data or loader.")
+        return self._data
 
 
 @dataclass(frozen=True)
@@ -182,6 +195,16 @@ def pull_and_stage(
         drop_folder = inbox / f"job_{job_id}"
         item = StagedSend(job_id, drop_folder, [m.id for m in g.msgs], identity=g.identity)
 
+        # No overview email yet -> we don't know the send's identity. Skip WITHOUT
+        # downloading any attachments (keeps frequent runs cheap); it'll be picked
+        # up on a later run once the overview-PDF email arrives.
+        if g.identity is None:
+            item.pending_reason = "awaiting overview-PDF email (identity) for this JobID"
+            item.log.append(f"PENDING: {item.pending_reason} (not downloaded)")
+            staged.append(item)
+            continue
+
+        # Identity present -> stage (this is where attachment bytes are fetched).
         seen: dict[str, str] = {}
         if drop_folder.exists():
             for existing in drop_folder.glob("*"):
@@ -191,13 +214,6 @@ def pull_and_stage(
             for att in msg.attachments:
                 if _save_dedup(drop_folder, att, seen):
                     item.log.append(f"staged {att.filename} (from {msg.id})")
-
-        # The overview email (identity + PDF) must have arrived to proceed.
-        if g.identity is None:
-            item.pending_reason = "awaiting overview-PDF email (identity) for this JobID"
-            item.log.append(f"PENDING: {item.pending_reason}")
-            staged.append(item)
-            continue
 
         try:
             item.result = process(drop_folder, g.identity)

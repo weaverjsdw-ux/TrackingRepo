@@ -136,6 +136,9 @@ class GmailSource:
         return "\n".join(chunks)
 
     def _extract_attachments(self, message_id: str, payload: dict) -> list[Attachment]:
+        """Return attachments with LAZY data: large parts (attachmentId) are only
+        downloaded when their .data is accessed (i.e. when actually staged), so a
+        pull doesn't fetch bytes for sends it won't process."""
         out: list[Attachment] = []
         for part in _walk_parts(payload):
             filename = part.get("filename")
@@ -143,14 +146,13 @@ class GmailSource:
             if not filename:
                 continue
             if "attachmentId" in body:
-                att = self._svc().users().messages().attachments().get(
-                    userId="me", messageId=message_id, id=body["attachmentId"]
-                ).execute()
-                data = att.get("data", "")
-            else:
-                data = body.get("data", "")
-            if data:
-                out.append(Attachment(filename, base64.urlsafe_b64decode(data)))
+                def loader(mid=message_id, aid=body["attachmentId"]) -> bytes:
+                    att = self._svc().users().messages().attachments().get(
+                        userId="me", messageId=mid, id=aid).execute()
+                    return base64.urlsafe_b64decode(att.get("data", ""))
+                out.append(Attachment(filename, loader=loader))
+            elif body.get("data"):  # small inline part — already present, free
+                out.append(Attachment(filename, base64.urlsafe_b64decode(body["data"])))
         return out
 
 

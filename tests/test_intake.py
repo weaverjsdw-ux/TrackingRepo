@@ -119,7 +119,8 @@ def test_pending_until_overview_arrives(synthetic_send, tmp_path):
     first = intake.pull_and_stage(src, "tracking-reports", tmp_path)
     assert first[0].pending_reason and "overview" in first[0].pending_reason
     assert src.marked == []
-    assert (tmp_path / "inbox" / f"job_{JOB}").exists()
+    # No overview yet -> nothing staged/downloaded (kept cheap for frequent runs).
+    assert not (tmp_path / "inbox" / f"job_{JOB}").exists()
 
     # Overview (identity) arrives -> completes.
     src._messages.append(_overview_msg(synthetic_send))
