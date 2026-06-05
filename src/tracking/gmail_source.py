@@ -52,12 +52,14 @@ class GmailSource:
     )
 
     def fetch_labeled(self, label: str) -> list[EmailMessage]:
-        """Return unhandled report emails. We locate them by sender (not by an
-        operator-applied label) and exclude any already marked done (the label is
-        added on mark_processed), so a missing/broken Gmail filter can't stop the
-        pipeline."""
+        """Return report emails located BY SENDER (not by label), so it works
+        whether or not a Gmail filter labels them. Idempotency is handled by the
+        intake state file (already-processed message ids are skipped), and
+        mark_processed removes the label as a 'done' visual. We deliberately do
+        NOT filter by label here: a filter that labels incoming exports must not
+        cause them to be skipped."""
         service = self._svc()
-        q = f"{self.REPORT_QUERY} -label:{label}"
+        q = self.REPORT_QUERY
         out: list[EmailMessage] = []
         req = service.users().messages().list(userId="me", q=q)
         while req is not None:
@@ -68,11 +70,12 @@ class GmailSource:
         return out
 
     def mark_processed(self, message_id: str) -> None:
-        # ADD the label as a 'done' marker so the email is excluded next run.
+        # Remove the label as a 'done' visual (labeled = still queued, unlabeled =
+        # handled). Idempotency is the state file, not the label. No-op if absent.
         label = os.environ.get("GMAIL_LABEL", "tracking-reports")
         self._svc().users().messages().modify(
             userId="me", id=message_id,
-            body={"addLabelIds": [self._label_id(label)]},
+            body={"removeLabelIds": [self._label_id(label)]},
         ).execute()
 
     # --- internals -------------------------------------------------------------
