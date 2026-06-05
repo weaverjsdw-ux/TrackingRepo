@@ -118,7 +118,8 @@ def cmd_write(args) -> int:
         if not args.commit:
             print(f"{folder.name}: DRY-RUN sheet values: {plan.values}")
             continue
-        written = write_send(writer, result.identity, plan)
+        written = write_send(writer, result.identity, plan,
+                             fill_blanks_only=not getattr(args, "force", False))
         # Create the renamed report folder (idempotent: skip if already filed).
         out = reports_dir / result.identity.folder_name
         if out.exists():
@@ -146,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pull", help="pull labeled emails, stage, process, preview").set_defaults(func=cmd_pull)
     w = sub.add_parser("write", help="write processed sends to the Sheet (dry-run unless --commit)")
     w.add_argument("--commit", action="store_true", help="actually write (default is dry-run)")
+    w.add_argument("--force", action="store_true",
+                   help="overwrite existing cells (reconcile), not just blanks")
     w.set_defaults(func=cmd_write)
     sub.add_parser("run", help="one cycle for scheduling: pull + write to the Sheet").set_defaults(func=cmd_run)
 
