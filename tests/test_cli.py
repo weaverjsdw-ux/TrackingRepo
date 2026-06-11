@@ -40,6 +40,23 @@ def test_write_with_no_processed_sends_is_noop(tmp_path, monkeypatch, capsys):
     assert "No processed sends" in capsys.readouterr().out
 
 
+def test_write_continues_after_one_processed_folder_errors(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed"
+    (processed / "A Bad Send").mkdir(parents=True)
+    shutil.copytree(synthetic_send, processed / synthetic_send.name)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+
+    rc = cli.main(["write"])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "A Bad Send: WRITE ERROR:" in out
+    assert f"{synthetic_send.name}: DRY-RUN sheet values" in out
+
+
 def test_status_prints_automation_state(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DROP_ROOT", str(tmp_path))

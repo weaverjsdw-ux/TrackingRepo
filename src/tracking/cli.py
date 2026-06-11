@@ -135,27 +135,31 @@ def cmd_write(args) -> int:
     )
     rc = 0
     for folder in sorted(p for p in processed.iterdir() if p.is_dir()):
-        result = pipeline.process_folder(folder)
-        pdf = next((p.source for p in result.planned if p.type is FileType.OVERVIEW_PDF), None)
-        if pdf is None:
-            print(f"{folder.name}: no overview PDF; skipping (cannot cross-check).")
+        try:
+            result = pipeline.process_folder(folder)
+            pdf = next((p.source for p in result.planned if p.type is FileType.OVERVIEW_PDF), None)
+            if pdf is None:
+                print(f"{folder.name}: no overview PDF; skipping (cannot cross-check).")
+                rc = 1
+                continue
+            summary = overview.parse_summary(pdf)
+            plan = build_sheet_plan(result, summary)
+            if not args.commit:
+                print(f"{folder.name}: DRY-RUN sheet values: {plan.values}")
+                continue
+            written = write_send(writer, result.identity, plan,
+                                 fill_blanks_only=not getattr(args, "force", False))
+            # Create the renamed report folder (idempotent: skip if already filed).
+            out = reports_dir / result.identity.folder_name
+            if out.exists():
+                filed = "report folder exists"
+            else:
+                names = filing.write_renamed(result, summary, out)
+                filed = f"filed {len(names)} renamed files -> {out}"
+            print(f"{folder.name}: wrote {len(written)} cells; {filed}")
+        except Exception as exc:  # noqa: BLE001 - batch command reports per-folder blockers
+            print(f"{folder.name}: WRITE ERROR: {exc}")
             rc = 1
-            continue
-        summary = overview.parse_summary(pdf)
-        plan = build_sheet_plan(result, summary)
-        if not args.commit:
-            print(f"{folder.name}: DRY-RUN sheet values: {plan.values}")
-            continue
-        written = write_send(writer, result.identity, plan,
-                             fill_blanks_only=not getattr(args, "force", False))
-        # Create the renamed report folder (idempotent: skip if already filed).
-        out = reports_dir / result.identity.folder_name
-        if out.exists():
-            filed = "report folder exists"
-        else:
-            names = filing.write_renamed(result, summary, out)
-            filed = f"filed {len(names)} renamed files -> {out}"
-        print(f"{folder.name}: wrote {len(written)} cells; {filed}")
     return rc
 
 
