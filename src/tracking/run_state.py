@@ -115,19 +115,33 @@ def draft_id_for(state_path: str | Path, send_key: str) -> str | None:
 
 
 def format_status(state_path: str | Path, *, processed_root: str | Path | None = None) -> str:
-    state = load_state(state_path)
-    lines = [f"Last run: {state.get('last_run') or 'never'}"]
+    state_readable = True
+    state_warning: str | None = None
+    try:
+        state = load_state(state_path)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        state_readable = False
+        state_warning = f"could not read {Path(state_path)}: {exc}"
+        state = _empty_state()
+
+    lines = []
+    if state_warning:
+        lines.append(f"Automation state warning: {state_warning}")
+    lines.append(f"Last run: {state.get('last_run') or ('never' if state_readable else 'unknown')}")
 
     pending = state.get("pending", {})
-    lines.append(f"Pending sends: {len(pending)}")
-    for job_id, entry in sorted(pending.items()):
-        message_count = len(entry.get("message_ids") or [])
-        lines.append(
-            f"  job {job_id}: {entry.get('reason')} "
-            f"(first seen {entry.get('first_seen')}, last seen {entry.get('last_seen')}, "
-            f"seen {entry.get('seen_count')}x, messages {message_count}, "
-            f"folder {entry.get('folder_name')})"
-        )
+    if state_readable:
+        lines.append(f"Pending sends: {len(pending)}")
+        for job_id, entry in sorted(pending.items()):
+            message_count = len(entry.get("message_ids") or [])
+            lines.append(
+                f"  job {job_id}: {entry.get('reason')} "
+                f"(first seen {entry.get('first_seen')}, last seen {entry.get('last_seen')}, "
+                f"seen {entry.get('seen_count')}x, messages {message_count}, "
+                f"folder {entry.get('folder_name')})"
+            )
+    else:
+        lines.append("Pending sends: unknown")
 
     processed = dict(state.get("processed", {}))
     if processed_root is not None:
@@ -146,8 +160,11 @@ def format_status(state_path: str | Path, *, processed_root: str | Path | None =
             lines.append(f"  {name}: processed folder present")
 
     drafts = state.get("drafts", {})
-    lines.append(f"Drafted reports: {len(drafts)}")
-    for name, entry in sorted(drafts.items()):
-        lines.append(f"  {name}: draft {entry.get('draft_id')} (created {entry.get('created_at')})")
+    if state_readable:
+        lines.append(f"Drafted reports: {len(drafts)}")
+        for name, entry in sorted(drafts.items()):
+            lines.append(f"  {name}: draft {entry.get('draft_id')} (created {entry.get('created_at')})")
+    else:
+        lines.append("Drafted reports: unknown")
 
     return "\n".join(lines)

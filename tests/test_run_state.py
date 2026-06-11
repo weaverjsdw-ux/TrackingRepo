@@ -97,3 +97,20 @@ def test_format_status_includes_processed_folders_from_disk(tmp_path):
 
     assert "Processed sends: 1" in text
     assert "Northshore College - Fall 2026 eNL: processed folder present" in text
+
+
+def test_format_status_reports_corrupt_state_without_hiding_processed_folders(tmp_path):
+    state_file = tmp_path / "automation_state.json"
+    state_file.write_text("{not valid json", encoding="utf-8")
+    processed = tmp_path / "processed"
+    (processed / "Northshore College - Fall 2026 eNL").mkdir(parents=True)
+
+    text = run_state.format_status(state_file, processed_root=processed)
+
+    assert "Automation state warning:" in text
+    assert "automation_state.json" in text
+    assert "Last run: unknown" in text
+    assert "Pending sends: unknown" in text
+    assert "Processed sends: 1" in text
+    assert "Northshore College - Fall 2026 eNL: processed folder present" in text
+    assert "Drafted reports: unknown" in text
