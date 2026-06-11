@@ -41,6 +41,24 @@ def _gmail_source():
     )
 
 
+def _draft_writer():
+    return _gmail_source()
+
+
+def _sfmc_client():
+    from . import sfmc
+    return sfmc.RealSfmcClient.from_env()
+
+
+def _drop_root() -> Path:
+    return Path(os.environ.get("DROP_ROOT", "./drop"))
+
+
+def _state_path() -> Path:
+    from . import run_state
+    return run_state.default_state_path(_drop_root())
+
+
 def cmd_authorize(_args) -> int:
     """Trigger the one-time OAuth consent and persist the token."""
     src = _gmail_source()
@@ -50,19 +68,23 @@ def cmd_authorize(_args) -> int:
 
 
 def cmd_pull(args) -> int:
-    from . import intake, overview, pipeline
+    from . import intake, overview, pipeline, run_state
     from .sheet import build_sheet_plan
     from .identify import FileType
 
     label = os.environ.get("GMAIL_LABEL", "tracking-reports")
-    drop = os.environ.get("DROP_ROOT", "./drop")
+    drop = _drop_root()
     staged = intake.pull_and_stage(_gmail_source(), label, drop)
+    state_update = run_state.record_staged(_state_path(), staged)
+    changed_pending = {s.job_id for s in state_update.changed_pending}
 
     if not staged:
         print("No new labeled messages to process.")
         return 0
 
     for s in staged:
+        if s.pending_reason and s.job_id not in changed_pending:
+            continue
         print(f"\n=== {s.folder_name} ===")
         for line in s.log:
             print(f"  {line}")
@@ -83,6 +105,12 @@ def cmd_pull(args) -> int:
                     print(f"  FLAG: {f}")
             except Exception as exc:  # noqa: BLE001
                 print(f"  SHEET PLAN ERROR (would block write): {exc}")
+    if state_update.unchanged_pending_count:
+        label = "send" if state_update.unchanged_pending_count == 1 else "sends"
+        print(
+            f"{state_update.unchanged_pending_count} unchanged pending {label} "
+            "suppressed; run `python -m tracking.cli status` for details."
+        )
     return 0
 
 
@@ -131,16 +159,89 @@ def cmd_write(args) -> int:
     return rc
 
 
+def cmd_draft_reports(_args) -> int:
+    from . import contacts, drafts, filing, overview, pipeline
+    from .identify import FileType
+
+    processed = _drop_root() / "processed"
+    if not processed.is_dir():
+        print(f"No processed sends at {processed}.")
+        return 0
+
+    contacts_path = Path(os.environ.get("CONTACTS_CSV", "contacts.csv"))
+    try:
+        contact_rows = contacts.load_contacts(contacts_path)
+    except Exception as exc:  # noqa: BLE001 - operator-facing batch command
+        print(f"DRAFT ERROR: {exc}")
+        return 1
+    reports_dir = Path(os.environ.get("REPORTS_DIR", str(Path.cwd().parent)))
+    writer = _draft_writer()
+
+    rc = 0
+    for folder in sorted(p for p in processed.iterdir() if p.is_dir()):
+        try:
+            result = pipeline.process_folder(folder)
+            pdf = next((p.source for p in result.planned if p.type is FileType.OVERVIEW_PDF), None)
+            if pdf is None:
+                raise drafts.DraftError("no overview PDF; cannot draft official report package")
+            summary = overview.parse_summary(pdf)
+            out = reports_dir / result.identity.folder_name
+            if not out.exists():
+                filing.write_renamed(result, summary, out)
+            contact = contacts.report_contact_for(contact_rows, result.identity)
+            outcome = drafts.create_engagement_draft(
+                writer, _state_path(), result.identity, out, contact
+            )
+            if outcome.created:
+                print(f"{result.identity.folder_name}: created draft {outcome.draft_id}")
+            else:
+                print(f"{result.identity.folder_name}: already drafted {outcome.draft_id}")
+        except Exception as exc:  # noqa: BLE001 - operator-facing batch command
+            print(f"{folder.name}: DRAFT ERROR: {exc}")
+            rc = 1
+    return rc
+
+
 def cmd_run(args) -> int:
     """One scheduled cycle: pull new sends, then write them to the Sheet."""
     from argparse import Namespace
     rc_pull = cmd_pull(args)
     rc_write = cmd_write(Namespace(commit=True))
-    return rc_pull or rc_write
+    rc_draft = cmd_draft_reports(args) if getattr(args, "drafts", False) else 0
+    return rc_pull or rc_write or rc_draft
+
+
+def cmd_status(_args) -> int:
+    from . import run_state
+    print(run_state.format_status(_state_path(), processed_root=_drop_root() / "processed"))
+    return 0
+
+
+def cmd_sfmc_probe(args) -> int:
+    from . import sfmc
+
+    result = sfmc.probe_capabilities(_sfmc_client(), args.send_id)
+    print(sfmc.format_probe_result(result))
+    return 0 if result.ok else 1
+
+
+def cmd_sfmc_stage(args) -> int:
+    from . import naming, sfmc
+
+    identity = naming.SendIdentity(
+        client=args.client,
+        season=args.season,
+        year=args.year,
+        type=args.type,
+    )
+    folder = sfmc.stage_send(_drop_root(), identity, _sfmc_client(), args.send_id)
+    count = len([p for p in folder.iterdir() if p.is_file()])
+    label = "artifact" if count == 1 else "artifacts"
+    print(f"{identity.folder_name}: staged {count} SFMC {label} -> {folder}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    _load_dotenv()
     parser = argparse.ArgumentParser(prog="tracking.cli", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("authorize", help="one-time Gmail OAuth consent").set_defaults(func=cmd_authorize)
@@ -150,9 +251,25 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--force", action="store_true",
                    help="overwrite existing cells (reconcile), not just blanks")
     w.set_defaults(func=cmd_write)
-    sub.add_parser("run", help="one cycle for scheduling: pull + write to the Sheet").set_defaults(func=cmd_run)
+    sub.add_parser("draft-reports", help="create Gmail drafts for processed engagement reports").set_defaults(func=cmd_draft_reports)
+    r = sub.add_parser("run", help="one cycle for scheduling: pull + write to the Sheet")
+    r.add_argument("--drafts", action="store_true",
+                   help="also create Gmail drafts after write-back succeeds")
+    r.set_defaults(func=cmd_run)
+    sub.add_parser("status", help="show last run, pending sends, processed sends, and drafts").set_defaults(func=cmd_status)
+    sf = sub.add_parser("sfmc-probe", help="probe SFMC API capabilities for one send")
+    sf.add_argument("--send-id", required=True, help="SFMC/ExactTarget send or job identifier to probe")
+    sf.set_defaults(func=cmd_sfmc_probe)
+    ss = sub.add_parser("sfmc-stage", help="fetch SFMC API artifacts into a processable drop folder")
+    ss.add_argument("--send-id", required=True, help="SFMC/ExactTarget send or job identifier to fetch")
+    ss.add_argument("--client", required=True, help="client name")
+    ss.add_argument("--season", required=True, help="send season")
+    ss.add_argument("--year", required=True, help="send year")
+    ss.add_argument("--type", required=True, help="send type, for example eNL or ePC")
+    ss.set_defaults(func=cmd_sfmc_stage)
 
     args = parser.parse_args(argv)
+    _load_dotenv()
     return args.func(args)
 
 

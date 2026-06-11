@@ -2,7 +2,7 @@
 
 One-time setup to take the tool live. Produces three things the tool needs:
 
-1. `secrets/client_secret.json` — OAuth client for **Gmail** (reads labeled report emails).
+1. `secrets/client_secret.json` — OAuth client for **Gmail** (reads labeled report emails and creates drafts).
 2. `secrets/service-account.json` — service account for **Google Sheets** (writes the counts).
 3. The service account's **email address** (`…iam.gserviceaccount.com`) — used to share the sheet.
 
@@ -30,7 +30,7 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 1. **APIs & Services** → **OAuth consent screen** (may appear as **Google Auth Platform → Branding / Audience**).
 2. User type: **External** → **Create**.
 3. Fill **App name**, **User support email**, **Developer contact email** → **Save and continue**.
-4. **Scopes**: skip (the tool requests Gmail scope at runtime) → **Save and continue**.
+4. **Scopes**: skip (the tool requests Gmail read/modify/compose scopes at runtime) → **Save and continue**.
 5. **Test users**: **Add users** → add the Gmail address that will receive the report emails → **Save**.
    *(Leaving the app in "Testing" is fine — only your test users can authorize it.)*
 
@@ -59,6 +59,20 @@ the stable landmarks — look for the nearest equivalent if wording differs.
    (`https://docs.google.com/spreadsheets/d/`**`<THIS PART>`**`/edit`) and note the **tab name**.
 4. **Send me:** the spreadsheet ID + tab name.
 
+## 8. Contact CSV for report drafts
+1. Copy `contacts.example.csv` to `contacts.csv`.
+2. Fill one row per client with `client`, `pc_email`, and `report_delivery_enabled`.
+3. Keep the real `contacts.csv` local; it is git-ignored.
+
+## 9. Unattended runner
+1. From the repo root, run `.\scripts\install_scheduled_task.ps1`.
+2. It registers `EngagementTracker` every 4 minutes using `wscript.exe` and the
+   hidden wrapper at `scripts/run_scheduled_hidden.vbs`.
+3. Leave drafts off until contact routing has been checked. Then rerun with
+   `.\scripts\install_scheduled_task.ps1 -Drafts`.
+4. Use `python -m tracking.cli status` to review pending JobIDs, processed
+   folders, and existing draft IDs without reading the full run log.
+
 ---
 
 ## What to hand back to me
@@ -66,6 +80,9 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 - ✉️ The service-account **email** (`…iam.gserviceaccount.com`).
 - ✉️ The **sheet copy ID** + **tab name**.
 - ✅ Confirm the report-email **subject** is the `Client - Season Year Type` form (or send one sample subject).
+- ✅ `contacts.csv` filled for any client that should receive draft report emails.
 
-Then I add the CLI runner, do the first live Gmail pull, and run the Sheet write
-against the copy.
+Then run `python -m tracking.cli authorize`, `pull`, `write --commit`, and
+`draft-reports`. Install the scheduled task only after those commands work
+manually. Use `run --drafts` or `install_scheduled_task.ps1 -Drafts` only after
+contact routing has been checked.

@@ -30,6 +30,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-p", "no:cacheprovider"]
 markers = [
     "realdata: tests that run against the real (git-ignored) example folder; skipped when absent (e.g. in CI).",
 ]
