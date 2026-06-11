@@ -225,6 +225,9 @@ def cmd_run(args) -> int:
     """One scheduled cycle: pull new sends, then write them to the Sheet."""
     from argparse import Namespace
     rc_pull = cmd_pull(args)
+    if rc_pull:
+        print("Skipping write and draft creation because pull did not complete cleanly.")
+        return rc_pull
     rc_write = cmd_write(Namespace(commit=True))
     rc_draft = 0
     if getattr(args, "drafts", False):
