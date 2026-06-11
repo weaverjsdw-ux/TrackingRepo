@@ -244,6 +244,7 @@ def cmd_run(args) -> int:
 
 def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
     from . import contacts, pipeline
+    from .identify import FileType
 
     if not processed_root.is_dir():
         return "Draft readiness: no processed sends"
@@ -261,6 +262,9 @@ def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
     for folder in folders:
         try:
             result = pipeline.process_folder(folder)
+            pdf = next((p.source for p in result.planned if p.type is FileType.OVERVIEW_PDF), None)
+            if pdf is None:
+                raise RuntimeError("no overview PDF; cannot draft official report package")
             contacts.report_contact_for(contact_rows, result.identity)
             ready += 1
         except Exception as exc:  # noqa: BLE001 - operator-facing status detail

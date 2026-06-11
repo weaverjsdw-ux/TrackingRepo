@@ -93,6 +93,31 @@ def test_status_reports_missing_contacts_as_draft_blocker(
     assert "Contact file not found" in out
 
 
+def test_status_blocks_draft_readiness_when_overview_pdf_missing(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    for pdf in processed.glob("*.pdf"):
+        pdf.unlink()
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+
+    rc = cli.main(["status"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Draft readiness: blocked" in out
+    assert "no overview PDF" in out
+
+
 def test_pull_suppresses_unchanged_pending_details(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DROP_ROOT", str(tmp_path))
