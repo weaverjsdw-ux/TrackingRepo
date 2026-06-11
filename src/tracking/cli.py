@@ -301,6 +301,12 @@ def cmd_sfmc_probe(args) -> int:
 def cmd_sfmc_stage(args) -> int:
     from . import naming, sfmc
 
+    client = _sfmc_client()
+    probe = sfmc.probe_capabilities(client, args.send_id)
+    print(sfmc.format_probe_result(probe))
+    if not probe.ok:
+        return 1
+
     identity = naming.SendIdentity(
         client=args.client,
         season=args.season,
@@ -311,7 +317,7 @@ def cmd_sfmc_stage(args) -> int:
         folder = sfmc.stage_send(
             _drop_root(),
             identity,
-            _sfmc_client(),
+            client,
             args.send_id,
             replace_existing=getattr(args, "force", False),
         )

@@ -407,6 +407,18 @@ def test_sfmc_probe_prints_fake_probe_result(monkeypatch, capsys):
 
 def test_sfmc_stage_uses_fake_source_adapter(tmp_path, monkeypatch, capsys, synthetic_send):
     class FakeSfmcClient:
+        def authenticate(self):
+            return True
+
+        def find_send(self, send_id):
+            return True
+
+        def tracking_count(self, send_id, metric):
+            return 1
+
+        def overview_pdf_available(self, send_id):
+            return True
+
         def fetch_artifacts(self, send_id):
             assert send_id == "12345"
             from tracking import sfmc
@@ -437,10 +449,72 @@ def test_sfmc_stage_uses_fake_source_adapter(tmp_path, monkeypatch, capsys, synt
     assert "staged 8 SFMC artifacts" in capsys.readouterr().out
 
 
+def test_sfmc_stage_blocks_when_probe_requires_ui_fallback(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    class FakeSfmcClient:
+        def __init__(self):
+            self.fetched = False
+
+        def authenticate(self):
+            return True
+
+        def find_send(self, send_id):
+            return True
+
+        def tracking_count(self, send_id, metric):
+            return 1
+
+        def overview_pdf_available(self, send_id):
+            return False
+
+        def fetch_artifacts(self, send_id):
+            self.fetched = True
+            from tracking import sfmc
+            return [
+                sfmc.SfmcArtifact(path.name, path.read_bytes())
+                for path in sorted(synthetic_send.iterdir())
+                if path.is_file()
+            ]
+
+    client = FakeSfmcClient()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setattr(cli, "_sfmc_client", lambda: client, raising=False)
+
+    rc = cli.main([
+        "sfmc-stage",
+        "--send-id", "12345",
+        "--client", "Northshore College",
+        "--season", "Fall",
+        "--year", "2026",
+        "--type", "eNL",
+    ])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert client.fetched is False
+    assert "SFMC probe for send 12345: BLOCKED" in out
+    assert "official overview PDF unavailable" in out
+    assert not (tmp_path / "drop" / "processed" / "Northshore College - Fall 2026 eNL").exists()
+
+
 def test_sfmc_stage_reports_existing_processed_folder_without_force(
     tmp_path, monkeypatch, capsys, synthetic_send
 ):
     class FakeSfmcClient:
+        def authenticate(self):
+            return True
+
+        def find_send(self, send_id):
+            return True
+
+        def tracking_count(self, send_id, metric):
+            return 1
+
+        def overview_pdf_available(self, send_id):
+            return True
+
         def fetch_artifacts(self, send_id):
             from tracking import sfmc
             return [

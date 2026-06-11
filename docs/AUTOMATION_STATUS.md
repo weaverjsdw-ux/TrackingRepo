@@ -26,12 +26,12 @@ Last reviewed: 2026-06-11
   Task Scheduler or Power Automate failure notifications.
 - Scheduler logs rotate through `logs/run.log.1` when `logs/run.log` exceeds the
   configured byte cap.
-- SFMC/ExactTarget API automation is gated behind `sfmc-probe`; `sfmc-stage`
-  only runs after explicit URL templates are configured and the probe passes.
-  Complete SFMC artifact sets are validated through the normal parser and
-  promoted into `drop/processed` so existing Sheet, draft, and status commands
-  consume them through the same path as Gmail intake. Existing processed folders
-  are not replaced unless `sfmc-stage --force` is used deliberately.
+- SFMC/ExactTarget API automation is gated behind the same probe used by
+  `sfmc-probe`; `sfmc-stage` runs that gate before fetching artifacts. Complete
+  SFMC artifact sets are validated through the normal parser and promoted into
+  `drop/processed` so existing Sheet, draft, and status commands consume them
+  through the same path as Gmail intake. Existing processed folders are not
+  replaced unless `sfmc-stage --force` is used deliberately.
 - Scheduled `run --drafts` creates drafts only after pull and Sheet write-back
   complete cleanly in the same run.
 

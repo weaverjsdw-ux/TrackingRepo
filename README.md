@@ -42,11 +42,11 @@ attachment names without creating Gmail drafts.
 `status` reports draft readiness, including missing or invalid contact routing,
 without creating drafts.
 
-`sfmc-stage` validates the fetched artifact set with the same parser and
-completeness gate as Gmail intake, then promotes complete sends into
-`DROP_ROOT/processed/<Client - Season Year Type>` so `write`, `draft-reports`,
-and `status` pick them up through the existing path. It refuses to replace an
-existing processed folder unless you rerun it with `--force`.
+`sfmc-stage` runs the same probe gate first, then validates the fetched artifact
+set with the parser and completeness gate used by Gmail intake. Complete sends
+are promoted into `DROP_ROOT/processed/<Client - Season Year Type>` so `write`,
+`draft-reports`, and `status` pick them up through the existing path. It refuses
+to replace an existing processed folder unless you rerun it with `--force`.
 
 Scheduler wrapper:
 
