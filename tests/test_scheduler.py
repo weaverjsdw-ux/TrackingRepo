@@ -86,6 +86,42 @@ def test_run_scheduled_returns_python_exit_code(tmp_path):
     assert "fake cli failed" in log.read_text(encoding="utf-8")
 
 
+def test_run_scheduled_ignores_invalid_log_cap(tmp_path):
+    runner = _copy_runner(tmp_path)
+    fake_python = tmp_path / "fake-python.cmd"
+    fake_python.write_text(
+        "@echo off\r\n"
+        "echo fake cli ok\r\n"
+        "exit /b 0\r\n",
+        encoding="ascii",
+    )
+    env = os.environ.copy()
+    env["TRACKING_PYTHON_EXE"] = str(fake_python)
+    env["TRACKING_RUN_LOG_MAX_BYTES"] = "not-a-number"
+
+    proc = subprocess.run(
+        [
+            _powershell(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0
+    log = tmp_path / "repo" / "logs" / "run.log"
+    text = log.read_text(encoding="utf-8")
+    assert "WARN: invalid TRACKING_RUN_LOG_MAX_BYTES" in text
+    assert "fake cli ok" in text
+
+
 def test_hidden_runner_returns_powershell_exit_code(tmp_path):
     hidden_runner = _copy_hidden_runner(tmp_path)
     ps1 = hidden_runner.parent / "run_scheduled.ps1"
