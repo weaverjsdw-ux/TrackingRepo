@@ -6,7 +6,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot           # ...\engagement-tracker
-$py   = Join-Path $root ".venv\Scripts\python.exe"
+if ($env:TRACKING_PYTHON_EXE) {
+    $py = $env:TRACKING_PYTHON_EXE
+} else {
+    $py = Join-Path $root ".venv\Scripts\python.exe"
+}
 $logDir = Join-Path $root "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 $log = Join-Path $logDir "run.log"
@@ -27,7 +31,15 @@ $mode = if ($Drafts) { "cli run --drafts" } else { "cli run" }
 try {
     $cliArgs = @("-m", "tracking.cli", "run")
     if ($Drafts) { $cliArgs += "--drafts" }
-    & $py @cliArgs *>&1 | Add-Content $log
+    $output = & $py @cliArgs *>&1
+    $exitCode = $LASTEXITCODE
+    $output | Add-Content $log
+    if ($null -eq $exitCode) { $exitCode = 0 }
+    if ($exitCode -ne 0) {
+        "ERROR: CLI exited with code $exitCode" | Add-Content $log
+    }
+    exit $exitCode
 } catch {
     "ERROR: $_" | Add-Content $log
+    exit 1
 }
