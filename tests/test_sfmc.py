@@ -51,6 +51,21 @@ def test_probe_checks_auth_send_tracking_and_pdf():
     assert "overview PDF: available" in sfmc.format_probe_result(result)
 
 
+def test_probe_blocks_when_auth_returns_false():
+    class FalseAuthClient(FakeProbeClient):
+        def authenticate(self):
+            self.calls.append(("authenticate",))
+            return False
+
+    client = FalseAuthClient()
+
+    result = sfmc.probe_capabilities(client, "12345")
+
+    assert result.ok is False
+    assert "auth failed" in result.blockers
+    assert ("find_send", "12345") not in client.calls
+
+
 def test_probe_requires_ui_fallback_when_official_pdf_unavailable():
     result = sfmc.probe_capabilities(FakeProbeClient(pdf=False), "12345")
 

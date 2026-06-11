@@ -64,7 +64,9 @@ class SfmcArtifactClient(Protocol):
 def probe_capabilities(client: SfmcProbeClient, send_id: str) -> SfmcProbeResult:
     result = SfmcProbeResult(send_id=send_id)
     try:
-        client.authenticate()
+        if not client.authenticate():
+            result.blockers.append("auth failed")
+            return result
         result.checks.append("auth: ok")
     except Exception as exc:  # noqa: BLE001 - probe reports, not raises
         result.blockers.append(f"auth failed: {exc}")
