@@ -64,6 +64,15 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 2. Fill one row per client with `client`, `pc_email`, and `report_delivery_enabled`.
 3. Keep the real `contacts.csv` local; it is git-ignored.
 
+## 9. Unattended runner
+1. From the repo root, run `.\scripts\install_scheduled_task.ps1`.
+2. It registers `EngagementTracker` every 4 minutes using `wscript.exe` and the
+   hidden wrapper at `scripts/run_scheduled_hidden.vbs`.
+3. Leave drafts off until contact routing has been checked. Then rerun with
+   `.\scripts\install_scheduled_task.ps1 -Drafts`.
+4. Use `python -m tracking.cli status` to review pending JobIDs, processed
+   folders, and existing draft IDs without reading the full run log.
+
 ---
 
 ## What to hand back to me
@@ -74,4 +83,6 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 - ✅ `contacts.csv` filled for any client that should receive draft report emails.
 
 Then run `python -m tracking.cli authorize`, `pull`, `write --commit`, and
-`draft-reports`. Use `run --drafts` only after contact routing has been checked.
+`draft-reports`. Install the scheduled task only after those commands work
+manually. Use `run --drafts` or `install_scheduled_task.ps1 -Drafts` only after
+contact routing has been checked.

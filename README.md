@@ -37,6 +37,19 @@ python -m tracking.cli sfmc-stage --send-id 12345 --client "Northshore College" 
 state so reruns do not create duplicate drafts. The Gmail OAuth token must have
 compose permission; rerun `authorize` if an older token only has intake access.
 
+Scheduler wrapper:
+
+```powershell
+.\scripts\install_scheduled_task.ps1                 # hidden run every 4 minutes
+.\scripts\install_scheduled_task.ps1 -Drafts         # only after contacts.csv is checked
+.\scripts\install_scheduled_task.ps1 -IntervalMinutes 10
+```
+
+The scheduled task calls `scripts/run_scheduled_hidden.vbs`, which launches
+`scripts/run_scheduled.ps1` with no visible console window. Power Automate can
+wrap the same command for notifications, but should not own parsing, naming,
+Sheet writes, or draft creation logic.
+
 ```python
 from tracking import pipeline
 r = pipeline.process_folder(r"...\<Client> - <Season> <Year> <Type>")

@@ -1,5 +1,9 @@
 # Runs one pull+write cycle and appends timestamped output to logs/run.log.
 # Invoked by the "EngagementTracker" scheduled task (every 4 minutes).
+param(
+    [switch]$Drafts
+)
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot           # ...\engagement-tracker
 $py   = Join-Path $root ".venv\Scripts\python.exe"
@@ -18,9 +22,12 @@ if ((Test-Path $log) -and ((Get-Item $log).Length -gt $maxBytes)) {
 
 Set-Location $root
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-"`n===== $stamp  cli run =====" | Add-Content $log
+$mode = if ($Drafts) { "cli run --drafts" } else { "cli run" }
+"`n===== $stamp  $mode =====" | Add-Content $log
 try {
-    & $py -m tracking.cli run *>&1 | Add-Content $log
+    $cliArgs = @("-m", "tracking.cli", "run")
+    if ($Drafts) { $cliArgs += "--drafts" }
+    & $py @cliArgs *>&1 | Add-Content $log
 } catch {
     "ERROR: $_" | Add-Content $log
 }
