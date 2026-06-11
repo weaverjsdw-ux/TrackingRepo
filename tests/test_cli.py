@@ -9,6 +9,7 @@ import shutil
 
 from tracking import cli
 from tracking import intake, run_state
+from tracking import naming
 from tracking.intake import StagedSend
 
 
@@ -217,6 +218,47 @@ def test_draft_reports_repairs_existing_report_folder_missing_pdf(
     assert "created draft draft-1" in capsys.readouterr().out
     assert any(p.name.endswith("Engagement Tracking Report.pdf")
                for p in writer.created[0].attachments)
+
+
+def test_draft_reports_repairs_existing_report_folder_missing_csvs(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    class FakeDraftWriter:
+        def __init__(self):
+            self.created = []
+
+        def create_draft(self, draft):
+            self.created.append(draft)
+            return "draft-1"
+
+    writer = FakeDraftWriter()
+    identity = naming.parse_send_identity(synthetic_send.name)
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    reports_dir = tmp_path / "reports"
+    existing = reports_dir / synthetic_send.name
+    existing.mkdir(parents=True)
+    raw_pdf = next(synthetic_send.glob("*.pdf"))
+    shutil.copy2(raw_pdf, existing / naming.finished_pdf_name(identity))
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+    monkeypatch.setattr(cli, "_draft_writer", lambda: writer)
+
+    rc = cli.main(["draft-reports"])
+
+    attachment_names = [p.name for p in writer.created[0].attachments]
+    assert rc == 0
+    assert "created draft draft-1" in capsys.readouterr().out
+    assert naming.finished_pdf_name(identity) in attachment_names
+    assert any(name.endswith(".csv") for name in attachment_names)
 
 
 def test_draft_reports_dry_run_plans_without_gmail(

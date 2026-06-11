@@ -209,7 +209,10 @@ def cmd_draft_reports(args) -> int:
                     f"{len(attachment_names)} attachments: {', '.join(attachment_names)}"
                 )
                 continue
-            if not out.exists() or not (out / naming.finished_pdf_name(result.identity)).is_file():
+            expected_names = [
+                name for _source, name in filing.planned_renamed(result, summary)
+            ]
+            if not out.exists() or any(not (out / name).is_file() for name in expected_names):
                 filing.write_renamed(result, summary, out)
             assert writer is not None
             outcome = drafts.create_engagement_draft(
