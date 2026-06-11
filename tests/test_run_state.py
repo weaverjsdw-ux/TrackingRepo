@@ -83,6 +83,7 @@ def test_format_status_shows_pending_and_processed(tmp_path):
     assert "Pending sends: 1" in text
     assert "job 555111" in text
     assert "awaiting overview-PDF" in text
+    assert "messages 1" in text
     assert "Processed sends: 1" in text
     assert "Northshore College - Fall 2026 eNL" in text
 

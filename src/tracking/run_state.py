@@ -121,10 +121,12 @@ def format_status(state_path: str | Path, *, processed_root: str | Path | None =
     pending = state.get("pending", {})
     lines.append(f"Pending sends: {len(pending)}")
     for job_id, entry in sorted(pending.items()):
+        message_count = len(entry.get("message_ids") or [])
         lines.append(
             f"  job {job_id}: {entry.get('reason')} "
             f"(first seen {entry.get('first_seen')}, last seen {entry.get('last_seen')}, "
-            f"seen {entry.get('seen_count')}x)"
+            f"seen {entry.get('seen_count')}x, messages {message_count}, "
+            f"folder {entry.get('folder_name')})"
         )
 
     processed = dict(state.get("processed", {}))
