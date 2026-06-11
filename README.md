@@ -50,6 +50,9 @@ The scheduled task calls `scripts/run_scheduled_hidden.vbs`, which launches
 wrap the same command for notifications, but should not own parsing, naming,
 Sheet writes, or draft creation logic.
 
+See `docs/AUTOMATION_STATUS.md` for the current automated/not-automated
+boundary, live blockers, Power Automate search evidence, and review-gate status.
+
 ```python
 from tracking import pipeline
 r = pipeline.process_folder(r"...\<Client> - <Season> <Year> <Type>")
