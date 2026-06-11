@@ -161,12 +161,16 @@ def test_sfmc_probe_prints_fake_probe_result(monkeypatch, capsys):
     assert "overview PDF: available" in out
 
 
-def test_sfmc_stage_uses_fake_source_adapter(tmp_path, monkeypatch, capsys):
+def test_sfmc_stage_uses_fake_source_adapter(tmp_path, monkeypatch, capsys, synthetic_send):
     class FakeSfmcClient:
         def fetch_artifacts(self, send_id):
             assert send_id == "12345"
             from tracking import sfmc
-            return [sfmc.SfmcArtifact("export_sent.csv", b"sent")]
+            return [
+                sfmc.SfmcArtifact(path.name, path.read_bytes())
+                for path in sorted(synthetic_send.iterdir())
+                if path.is_file()
+            ]
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
@@ -182,6 +186,8 @@ def test_sfmc_stage_uses_fake_source_adapter(tmp_path, monkeypatch, capsys):
     ])
 
     assert rc == 0
-    folder = tmp_path / "drop" / "sfmc" / "Northshore College - Fall 2026 eNL"
-    assert (folder / "export_sent.csv").read_text(encoding="utf-8") == "sent"
-    assert "staged 1 SFMC artifact" in capsys.readouterr().out
+    folder = tmp_path / "drop" / "processed" / "Northshore College - Fall 2026 eNL"
+    assert (folder / "export_1001.csv").read_bytes() == (
+        synthetic_send / "export_1001.csv"
+    ).read_bytes()
+    assert "staged 8 SFMC artifacts" in capsys.readouterr().out

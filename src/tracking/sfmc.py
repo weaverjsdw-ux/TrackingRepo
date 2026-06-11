@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from .naming import SendIdentity
+from .pipeline import assess_completeness, process_folder
 
 TRACKING_METRICS = ("sent", "open", "click", "bounce", "unsub")
 REQUIRED_ARTIFACTS = ("sent", "open", "click", "bounce", "unsub", "overview_pdf")
@@ -112,11 +114,29 @@ def stage_artifacts(
     identity: SendIdentity,
     artifacts: list[SfmcArtifact],
 ) -> Path:
-    folder = Path(drop_root) / "sfmc" / identity.folder_name
+    """Stage a complete SFMC artifact set into the canonical processed folder."""
+    root = Path(drop_root)
+    folder = root / "sfmc" / identity.folder_name
+    if folder.exists():
+        shutil.rmtree(folder)
     folder.mkdir(parents=True, exist_ok=True)
     for artifact in artifacts:
         (folder / artifact.filename).write_bytes(artifact.data)
-    return folder
+
+    try:
+        result = process_folder(folder, identity)
+    except Exception as exc:  # noqa: BLE001 - operator-facing feasibility gate
+        raise SfmcConfigError(f"incomplete SFMC artifact set: {exc}") from exc
+    ok, missing = assess_completeness(result)
+    if not ok:
+        raise SfmcConfigError(f"incomplete SFMC artifact set: missing {missing}")
+
+    processed = root / "processed" / identity.folder_name
+    if processed.exists():
+        shutil.rmtree(processed)
+    processed.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(folder), str(processed))
+    return processed
 
 
 def stage_send(

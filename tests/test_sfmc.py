@@ -8,6 +8,14 @@ from tracking import sfmc
 from tracking.naming import SendIdentity
 
 
+def _artifacts_from(folder):
+    return [
+        sfmc.SfmcArtifact(path.name, path.read_bytes())
+        for path in sorted(folder.iterdir())
+        if path.is_file()
+    ]
+
+
 class FakeProbeClient:
     def __init__(self, *, send=True, rows=None, pdf=True):
         self.send = send
@@ -58,26 +66,39 @@ def test_probe_fails_when_send_cannot_be_found():
     assert "send lookup failed" in result.blockers
 
 
-def test_stage_artifacts_writes_canonical_folder(tmp_path):
+def test_stage_artifacts_writes_canonical_processed_folder(tmp_path, synthetic_send):
     identity = SendIdentity("Northshore College", "Fall", "2026", "eNL")
-    folder = sfmc.stage_artifacts(
-        tmp_path,
-        identity,
-        [sfmc.SfmcArtifact("export_1001.csv", b"Email Address\nperson@example.com\n")],
-    )
 
-    assert folder == tmp_path / "sfmc" / "Northshore College - Fall 2026 eNL"
-    assert (folder / "export_1001.csv").read_bytes().startswith(b"Email Address")
+    folder = sfmc.stage_artifacts(tmp_path, identity, _artifacts_from(synthetic_send))
+
+    assert folder == tmp_path / "processed" / "Northshore College - Fall 2026 eNL"
+    assert (folder / "export_1001.csv").read_bytes() == (
+        synthetic_send / "export_1001.csv"
+    ).read_bytes()
+    assert not (tmp_path / "sfmc" / "Northshore College - Fall 2026 eNL").exists()
 
 
-def test_stage_send_fetches_artifacts_from_source_adapter(tmp_path):
+def test_stage_artifacts_blocks_incomplete_artifact_set(tmp_path):
+    identity = SendIdentity("Northshore College", "Fall", "2026", "eNL")
+
+    with pytest.raises(sfmc.SfmcConfigError, match="incomplete SFMC artifact set"):
+        sfmc.stage_artifacts(
+            tmp_path,
+            identity,
+            [sfmc.SfmcArtifact("export_1001.csv", b"Email Address\nperson@example.com\n")],
+        )
+
+    assert not (tmp_path / "processed" / identity.folder_name).exists()
+
+
+def test_stage_send_fetches_artifacts_from_source_adapter(tmp_path, synthetic_send):
     class FakeArtifactClient:
         def __init__(self):
             self.send_ids = []
 
         def fetch_artifacts(self, send_id):
             self.send_ids.append(send_id)
-            return [sfmc.SfmcArtifact("export_sent.csv", b"sent")]
+            return _artifacts_from(synthetic_send)
 
     client = FakeArtifactClient()
     identity = SendIdentity("Northshore College", "Fall", "2026", "eNL")
@@ -85,7 +106,10 @@ def test_stage_send_fetches_artifacts_from_source_adapter(tmp_path):
     folder = sfmc.stage_send(tmp_path, identity, client, "12345")
 
     assert client.send_ids == ["12345"]
-    assert (folder / "export_sent.csv").read_text(encoding="utf-8") == "sent"
+    assert folder == tmp_path / "processed" / "Northshore College - Fall 2026 eNL"
+    assert (folder / "export_1001.csv").read_bytes() == (
+        synthetic_send / "export_1001.csv"
+    ).read_bytes()
 
 
 def test_real_client_from_env_requires_credentials(monkeypatch):

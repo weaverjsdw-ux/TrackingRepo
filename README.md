@@ -37,6 +37,11 @@ python -m tracking.cli sfmc-stage --send-id 12345 --client "Northshore College" 
 state so reruns do not create duplicate drafts. The Gmail OAuth token must have
 compose permission; rerun `authorize` if an older token only has intake access.
 
+`sfmc-stage` validates the fetched artifact set with the same parser and
+completeness gate as Gmail intake, then promotes complete sends into
+`DROP_ROOT/processed/<Client - Season Year Type>` so `write`, `draft-reports`,
+and `status` pick them up through the existing path.
+
 Scheduler wrapper:
 
 ```powershell
@@ -74,7 +79,7 @@ print("\n".join(r.log))   # auditable per-run log
 | `sheet.py` (Phase 3) | `build_sheet_plan` (loud on missing-but-expected metric / unmatched bounce / BH=0; flags fallback BH; warns on snapshot drift) + `write_send` (match client row × metric-header column; loud on missing row/column). |
 | `contacts.py` / `drafts.py` | Local CSV contact validation + Gmail draft construction. Missing, disabled, or ambiguous contacts block drafts. Official overview PDF attachment is required. |
 | `run_state.py` | Local automation state: last run, processed sends, pending JobIDs with first/last seen timestamps, and draft IDs for idempotency. |
-| `sfmc.py` | API-first ExactTarget/SFMC feasibility gate and source-staging helpers. If the API cannot provide the official overview PDF, the PDF remains required and a UI/Power Automate fallback is only for that missing artifact. |
+| `sfmc.py` | API-first ExactTarget/SFMC feasibility gate and source-staging helpers. Complete API artifact sets are validated and promoted into `drop/processed` so existing Sheet/draft/status commands consume them. If the API cannot provide the official overview PDF, the PDF remains required and a UI/Power Automate fallback is only for that missing artifact. |
 | `gmail_source.py` / `sheets_writer.py` | Live adapters behind the `EmailSource` / `DraftWriter` / `SheetWriter` interfaces (optional `[gmail]`/`[sheets]` extras, lazy imports). Offline tests use fakes; live runs require local credentials. |
 
 ## Fixtures / PII

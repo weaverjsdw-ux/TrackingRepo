@@ -260,7 +260,10 @@ def main(argv: list[str] | None = None) -> int:
     sf = sub.add_parser("sfmc-probe", help="probe SFMC API capabilities for one send")
     sf.add_argument("--send-id", required=True, help="SFMC/ExactTarget send or job identifier to probe")
     sf.set_defaults(func=cmd_sfmc_probe)
-    ss = sub.add_parser("sfmc-stage", help="fetch SFMC API artifacts into a processable drop folder")
+    ss = sub.add_parser(
+        "sfmc-stage",
+        help="fetch SFMC API artifacts into the canonical processed folder",
+    )
     ss.add_argument("--send-id", required=True, help="SFMC/ExactTarget send or job identifier to fetch")
     ss.add_argument("--client", required=True, help="client name")
     ss.add_argument("--season", required=True, help="send season")
