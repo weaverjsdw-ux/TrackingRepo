@@ -50,8 +50,9 @@ def load_contacts(path: str | Path) -> list[Contact]:
 
         contacts: list[Contact] = []
         for row_num, row in enumerate(reader, start=2):
-            client = (row.get("client") or "").strip()
-            email = (row.get("pc_email") or "").strip()
+            normalized = {str(k).strip(): v for k, v in row.items()}
+            client = (normalized.get("client") or "").strip()
+            email = (normalized.get("pc_email") or "").strip()
             if not client:
                 raise ContactError(f"Row {row_num}: client is required.")
             if not _EMAIL_RE.match(email):
@@ -59,7 +60,7 @@ def load_contacts(path: str | Path) -> list[Contact]:
             contacts.append(Contact(
                 client=client,
                 pc_email=email,
-                report_delivery_enabled=_bool(row.get("report_delivery_enabled", "")),
+                report_delivery_enabled=_bool(normalized.get("report_delivery_enabled", "")),
             ))
     return contacts
 

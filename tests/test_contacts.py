@@ -26,6 +26,22 @@ def test_report_contact_matches_client(tmp_path):
     assert contact.report_delivery_enabled is True
 
 
+def test_load_contacts_accepts_whitespace_padded_headers(tmp_path):
+    path = tmp_path / "contacts.csv"
+    path.write_text(
+        " client , pc_email , report_delivery_enabled \n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+
+    contact = report_contact_for(
+        load_contacts(path),
+        SendIdentity("Northshore College", "Fall", "2026", "eNL"),
+    )
+
+    assert contact.pc_email == "pc@example.com"
+
+
 def test_missing_contact_blocks_report_delivery(tmp_path):
     path = tmp_path / "contacts.csv"
     _write_contacts(path, ["Other College,pc@example.com,yes"])
