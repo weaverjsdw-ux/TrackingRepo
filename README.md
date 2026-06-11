@@ -28,6 +28,7 @@ python -m tracking.cli draft-reports --dry-run
 python -m tracking.cli draft-reports --dry-run --prepare-files
 python -m tracking.cli draft-reports
 python -m tracking.cli status
+python -m tracking.cli status --json           # machine-readable wrapper/notification status
 python -m tracking.cli contacts-init           # create local starter contacts.csv from processed sends
 python -m tracking.cli run                     # scheduled pull + Sheet write
 python -m tracking.cli run --drafts            # opt-in draft creation too
@@ -49,7 +50,9 @@ attachment names without creating Gmail drafts. Add `--prepare-files` to that
 dry run when you also want to write or repair the local report folders without
 touching Gmail.
 `status` reports draft readiness, including missing or invalid contact routing,
-without creating drafts.
+without creating drafts. `status --json` exposes the same pending, processed,
+draft, and draft-readiness facts as structured JSON for Power Automate or other
+notification wrappers.
 
 `sfmc-stage` runs the same probe gate first, then validates the fetched artifact
 set with the parser and completeness gate used by Gmail intake. Complete sends

@@ -4,6 +4,8 @@ The credential-dependent commands (authorize/pull, and write --commit) need live
 creds and are exercised manually; here we cover argument wiring, the .env loader,
 and the early-return write path that touches no Google API."""
 
+import json
+
 import pytest
 import shutil
 
@@ -285,6 +287,35 @@ def test_status_reports_singular_draft_ready_grammar(
     out = capsys.readouterr().out
     assert rc == 0
     assert "Draft readiness: ready (1 processed send has enabled contact)" in out
+
+
+def test_status_json_reports_machine_readable_draft_blockers(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,,no\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+
+    rc = cli.main(["status", "--json"])
+
+    data = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert data["processed_count"] == 1
+    assert data["drafted_count"] == 0
+    assert data["pending_count"] == 0
+    assert data["draft_readiness"]["state"] == "blocked"
+    assert data["draft_readiness"]["blockers"] == [{
+        "send": synthetic_send.name,
+        "reason": "Report delivery is disabled for client 'Northshore College'.",
+    }]
 
 
 def test_contacts_init_writes_starter_from_processed_sends(

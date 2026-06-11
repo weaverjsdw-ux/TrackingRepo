@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sys
 from pathlib import Path
@@ -262,23 +263,27 @@ def cmd_run(args) -> int:
     return rc_pull or rc_write or rc_draft
 
 
-def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
+def _draft_readiness_summary(processed_root: Path, contacts_path: Path) -> dict:
     from . import contacts, filing, overview, pipeline
     from .identify import FileType
 
     if not processed_root.is_dir():
-        return "Draft readiness: no processed sends"
+        return {"state": "none", "ready_count": 0, "blockers": []}
     folders = sorted(p for p in processed_root.iterdir() if p.is_dir())
     if not folders:
-        return "Draft readiness: no processed sends"
+        return {"state": "none", "ready_count": 0, "blockers": []}
 
     try:
         contact_rows = contacts.load_contacts(contacts_path)
     except Exception as exc:  # noqa: BLE001 - status should report blockers, not fail
-        return f"Draft readiness: blocked ({exc})"
+        return {
+            "state": "blocked",
+            "ready_count": 0,
+            "blockers": [{"send": None, "reason": str(exc)}],
+        }
 
     ready = 0
-    blockers: list[str] = []
+    blockers: list[dict[str, str]] = []
     for folder in folders:
         try:
             result = pipeline.process_folder(folder)
@@ -290,19 +295,109 @@ def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
             contacts.report_contact_for(contact_rows, result.identity)
             ready += 1
         except Exception as exc:  # noqa: BLE001 - operator-facing status detail
-            blockers.append(f"  {folder.name}: {exc}")
+            blockers.append({"send": folder.name, "reason": str(exc)})
 
+    return {
+        "state": "blocked" if blockers else "ready",
+        "ready_count": ready,
+        "blockers": blockers,
+    }
+
+
+def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
+    summary = _draft_readiness_summary(processed_root, contacts_path)
+    state = summary["state"]
+    blockers = summary["blockers"]
+
+    if state == "none":
+        return "Draft readiness: no processed sends"
+    if blockers and blockers[0]["send"] is None:
+        return f"Draft readiness: blocked ({blockers[0]['reason']})"
     if blockers:
-        return "Draft readiness: blocked\n" + "\n".join(blockers)
+        lines = [
+            f"  {blocker['send']}: {blocker['reason']}"
+            for blocker in blockers
+        ]
+        return "Draft readiness: blocked\n" + "\n".join(lines)
+    ready = summary["ready_count"]
     if ready == 1:
         return "Draft readiness: ready (1 processed send has enabled contact)"
     return f"Draft readiness: ready ({ready} processed sends have enabled contacts)"
 
 
-def cmd_status(_args) -> int:
+def _status_summary(state_path: Path, processed_root: Path, contacts_path: Path) -> dict:
     from . import run_state
+
+    state_readable = True
+    state_warning = None
+    try:
+        state = run_state.load_state(state_path)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        state_readable = False
+        state_warning = f"could not read {state_path}: {exc}"
+        state = {"last_run": None, "pending": {}, "processed": {}, "drafts": {}}
+
+    pending = state.get("pending", {}) if state_readable else {}
+    processed = dict(state.get("processed", {}))
+    if processed_root.is_dir():
+        for folder in sorted(p for p in processed_root.iterdir() if p.is_dir()):
+            processed.setdefault(
+                folder.name,
+                {"job_id": None, "last_seen": None, "folder_present": True},
+            )
+    drafts = state.get("drafts", {}) if state_readable else {}
+
+    return {
+        "state_warning": state_warning,
+        "last_run": state.get("last_run") if state_readable else None,
+        "pending_count": len(pending) if state_readable else None,
+        "pending": [
+            {
+                "job_id": job_id,
+                "reason": entry.get("reason"),
+                "first_seen": entry.get("first_seen"),
+                "last_seen": entry.get("last_seen"),
+                "seen_count": entry.get("seen_count"),
+                "message_count": len(entry.get("message_ids") or []),
+                "folder_name": entry.get("folder_name"),
+            }
+            for job_id, entry in sorted(pending.items())
+        ],
+        "processed_count": len(processed),
+        "processed": [
+            {
+                "send": name,
+                "job_id": entry.get("job_id"),
+                "last_seen": entry.get("last_seen"),
+                "folder_present": bool(entry.get("folder_present")),
+            }
+            for name, entry in sorted(processed.items())
+        ],
+        "drafted_count": len(drafts) if state_readable else None,
+        "drafts": [
+            {
+                "send": name,
+                "draft_id": entry.get("draft_id"),
+                "created_at": entry.get("created_at"),
+            }
+            for name, entry in sorted(drafts.items())
+        ],
+        "draft_readiness": _draft_readiness_summary(processed_root, contacts_path),
+    }
+
+
+def cmd_status(args) -> int:
+    from . import run_state
+
     processed_root = _drop_root() / "processed"
     contacts_path = Path(os.environ.get("CONTACTS_CSV", "contacts.csv"))
+    if getattr(args, "json", False):
+        print(json.dumps(
+            _status_summary(_state_path(), processed_root, contacts_path),
+            indent=2,
+            sort_keys=True,
+        ))
+        return 0
     print(run_state.format_status(_state_path(), processed_root=processed_root))
     print(_format_draft_readiness(processed_root, contacts_path))
     return 0
@@ -416,7 +511,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--drafts", action="store_true",
                    help="also create Gmail drafts after write-back succeeds")
     r.set_defaults(func=cmd_run)
-    sub.add_parser("status", help="show last run, pending sends, processed sends, and drafts").set_defaults(func=cmd_status)
+    st = sub.add_parser("status", help="show last run, pending sends, processed sends, and drafts")
+    st.add_argument("--json", action="store_true", help="emit machine-readable status for wrappers")
+    st.set_defaults(func=cmd_status)
     ci = sub.add_parser(
         "contacts-init",
         help="create a local starter contacts.csv from processed sends",

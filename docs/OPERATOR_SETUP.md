@@ -79,7 +79,8 @@ the stable landmarks — look for the nearest equivalent if wording differs.
    `.\scripts\install_scheduled_task.ps1 -Drafts`.
 4. Use `python -m tracking.cli status` to review pending JobIDs, processed
    folders, existing draft IDs, and draft-readiness blockers without reading the
-   full run log.
+   full run log. Use `python -m tracking.cli status --json` if Power Automate
+   or another wrapper needs machine-readable counts and blocker details.
 
 ---
 
