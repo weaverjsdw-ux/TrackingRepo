@@ -413,6 +413,33 @@ def test_contacts_init_add_missing_leaves_complete_contacts_unchanged(
     assert contacts.read_text(encoding="utf-8") == existing
 
 
+def test_contacts_init_add_missing_handles_contacts_file_without_final_newline(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed"
+    shutil.copytree(synthetic_send, processed / synthetic_send.name)
+    (processed / "Zenith College - Fall 2026 eNL").mkdir(parents=True)
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+
+    rc = cli.main(["contacts-init", "--add-missing"])
+
+    assert rc == 0
+    assert "Added 1 missing starter contact row" in capsys.readouterr().out
+    assert contacts.read_text(encoding="utf-8").splitlines() == [
+        "client,pc_email,report_delivery_enabled",
+        "Northshore College,pc@example.com,yes",
+        "Zenith College,,no",
+    ]
+
+
 def test_pull_suppresses_unchanged_pending_details(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DROP_ROOT", str(tmp_path))

@@ -446,6 +446,12 @@ def cmd_contacts_init(args) -> int:
         if not missing:
             print(f"No missing contact rows for processed sends in {contacts_path}.")
             return 0
+        if contacts_path.stat().st_size:
+            with contacts_path.open("rb") as existing_file:
+                existing_file.seek(-1, 2)
+                if existing_file.read(1) not in {b"\n", b"\r"}:
+                    with contacts_path.open("a", newline="", encoding="utf-8") as f:
+                        f.write("\n")
         with contacts_path.open("a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(
                 f,
