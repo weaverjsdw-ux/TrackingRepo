@@ -36,6 +36,8 @@ python -m tracking.cli sfmc-stage --send-id 12345 --client "Northshore College" 
 `contacts.example.csv`) and records Gmail draft IDs in the local automation
 state so reruns do not create duplicate drafts. The Gmail OAuth token must have
 compose permission; rerun `authorize` if an older token only has intake access.
+`status` reports draft readiness, including missing or invalid contact routing,
+without creating drafts.
 
 Scheduler wrapper:
 

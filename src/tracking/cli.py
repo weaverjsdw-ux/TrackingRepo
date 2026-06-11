@@ -216,9 +216,42 @@ def cmd_run(args) -> int:
     return rc_pull or rc_write or rc_draft
 
 
+def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
+    from . import contacts, pipeline
+
+    if not processed_root.is_dir():
+        return "Draft readiness: no processed sends"
+    folders = sorted(p for p in processed_root.iterdir() if p.is_dir())
+    if not folders:
+        return "Draft readiness: no processed sends"
+
+    try:
+        contact_rows = contacts.load_contacts(contacts_path)
+    except Exception as exc:  # noqa: BLE001 - status should report blockers, not fail
+        return f"Draft readiness: blocked ({exc})"
+
+    ready = 0
+    blockers: list[str] = []
+    for folder in folders:
+        try:
+            result = pipeline.process_folder(folder)
+            contacts.report_contact_for(contact_rows, result.identity)
+            ready += 1
+        except Exception as exc:  # noqa: BLE001 - operator-facing status detail
+            blockers.append(f"  {folder.name}: {exc}")
+
+    if blockers:
+        return "Draft readiness: blocked\n" + "\n".join(blockers)
+    label = "send" if ready == 1 else "sends"
+    return f"Draft readiness: ready ({ready} processed {label} have enabled contacts)"
+
+
 def cmd_status(_args) -> int:
     from . import run_state
-    print(run_state.format_status(_state_path(), processed_root=_drop_root() / "processed"))
+    processed_root = _drop_root() / "processed"
+    contacts_path = Path(os.environ.get("CONTACTS_CSV", "contacts.csv"))
+    print(run_state.format_status(_state_path(), processed_root=processed_root))
+    print(_format_draft_readiness(processed_root, contacts_path))
     return 0
 
 
