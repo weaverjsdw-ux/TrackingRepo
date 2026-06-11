@@ -30,6 +30,7 @@ python -m tracking.cli draft-reports
 python -m tracking.cli status
 python -m tracking.cli status --json           # machine-readable wrapper/notification status
 python -m tracking.cli contacts-init           # create local starter contacts.csv from processed sends
+python -m tracking.cli contacts-init --add-missing  # append disabled rows for new processed clients
 python -m tracking.cli run                     # scheduled pull + Sheet write
 python -m tracking.cli run --drafts            # opt-in draft creation too
 python -m tracking.cli sfmc-probe --send-id 12345
@@ -41,7 +42,9 @@ python -m tracking.cli sfmc-stage --send-id 12345 --client "Northshore College" 
 `drop/processed`) and records Gmail draft IDs in the local automation state so
 reruns do not create duplicate drafts. `contacts-init` never overwrites an
 existing file; it creates disabled starter rows with blank PC emails for the
-operator to fill and review. The Gmail OAuth token must have compose
+operator to fill and review. After later processed sends add new clients, run
+`contacts-init --add-missing` to append only missing disabled rows while
+preserving reviewed contacts. The Gmail OAuth token must have compose
 permission; rerun `authorize` if an older token only has intake access. The
 contact CSV is engagement-only: extra lead-score/HIPAA routing fields are
 rejected until that later workflow is designed.

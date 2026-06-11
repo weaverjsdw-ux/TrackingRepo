@@ -404,11 +404,11 @@ def cmd_status(args) -> int:
 
 
 def cmd_contacts_init(args) -> int:
-    from . import naming
+    from . import contacts, naming
 
     processed_root = _drop_root() / "processed"
     contacts_path = Path(args.output or os.environ.get("CONTACTS_CSV", "contacts.csv"))
-    if contacts_path.exists():
+    if contacts_path.exists() and not getattr(args, "add_missing", False):
         print(f"CONTACTS INIT ERROR: refusing to overwrite existing contact file: {contacts_path}")
         return 1
     if not processed_root.is_dir():
@@ -427,6 +427,40 @@ def cmd_contacts_init(args) -> int:
 
     if not clients:
         print(f"No processed sends at {processed_root}.")
+        return 0
+
+    if contacts_path.exists():
+        try:
+            existing = contacts.load_contacts(contacts_path)
+        except Exception as exc:  # noqa: BLE001 - operator-facing setup helper
+            print(f"CONTACTS INIT ERROR: {exc}")
+            return 1
+        existing_keys = {
+            " ".join(contact.client.casefold().split())
+            for contact in existing
+        }
+        missing = [
+            client for key, client in sorted(clients.items(), key=lambda item: item[1].casefold())
+            if key not in existing_keys
+        ]
+        if not missing:
+            print(f"No missing contact rows for processed sends in {contacts_path}.")
+            return 0
+        with contacts_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["client", "pc_email", "report_delivery_enabled"],
+                lineterminator="\n",
+            )
+            for client in missing:
+                writer.writerow({
+                    "client": client,
+                    "pc_email": "",
+                    "report_delivery_enabled": "no",
+                })
+        count = len(missing)
+        label = "row" if count == 1 else "rows"
+        print(f"Added {count} missing starter contact {label} -> {contacts_path}")
         return 0
 
     contacts_path.parent.mkdir(parents=True, exist_ok=True)
@@ -519,6 +553,8 @@ def main(argv: list[str] | None = None) -> int:
         help="create a local starter contacts.csv from processed sends",
     )
     ci.add_argument("--output", help="contact CSV path (default: CONTACTS_CSV or contacts.csv)")
+    ci.add_argument("--add-missing", action="store_true",
+                    help="append disabled rows for processed clients missing from an existing contacts file")
     ci.set_defaults(func=cmd_contacts_init)
     sf = sub.add_parser("sfmc-probe", help="probe SFMC API capabilities for one send")
     sf.add_argument("--send-id", required=True, help="SFMC/ExactTarget send or job identifier to probe")

@@ -21,7 +21,8 @@ Last reviewed: 2026-06-11
 - `python -m tracking.cli contacts-init` creates a local starter `contacts.csv`
   from processed client folders when the real file is missing. Starter rows are
   disabled and have blank PC emails, and the command refuses to overwrite an
-  existing contact file.
+  existing contact file unless `--add-missing` is used to append only missing
+  processed clients as disabled starter rows.
 - Run state tracks last run, pending JobIDs, processed sends, and draft IDs.
   `python -m tracking.cli status` shows pending reasons, message counts,
   folder keys, processed folders, draft IDs, and draft-readiness blockers such
@@ -54,7 +55,7 @@ Last reviewed: 2026-06-11
 - Draft creation is blocked until the git-ignored `contacts.csv` has reviewed
   PC emails and enabled delivery rows. `contacts.example.csv` is committed as
   the operator template, and `contacts-init` can generate a local starter from
-  processed sends.
+  processed sends or append missing processed clients with `--add-missing`.
 - Power Automate Desktop is not part of core business logic. It should only wrap
   the Python CLI for notifications or operator convenience.
 - CodeRabbit did not leave actionable PR feedback on the merged automation PR.

@@ -67,9 +67,12 @@ the stable landmarks — look for the nearest equivalent if wording differs.
    `report_delivery_enabled`. `contacts-init` starts every row as disabled
    (`report_delivery_enabled=no`) with a blank PC email; change those only after
    recipient review.
-3. Do not add lead-score, HIPAA, or secure-routing columns here; those are a
+3. When later processed sends introduce new clients, run
+   `python -m tracking.cli contacts-init --add-missing` to append only missing
+   disabled rows without changing reviewed contacts.
+4. Do not add lead-score, HIPAA, or secure-routing columns here; those are a
    later workflow and are rejected by the engagement draft validator.
-4. Keep the real `contacts.csv` local; it is git-ignored.
+5. Keep the real `contacts.csv` local; it is git-ignored.
 
 ## 9. Unattended runner
 1. From the repo root, run `.\scripts\install_scheduled_task.ps1`.
