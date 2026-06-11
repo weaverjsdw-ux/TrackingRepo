@@ -85,3 +85,14 @@ def test_format_status_shows_pending_and_processed(tmp_path):
     assert "awaiting overview-PDF" in text
     assert "Processed sends: 1" in text
     assert "Northshore College - Fall 2026 eNL" in text
+
+
+def test_format_status_includes_processed_folders_from_disk(tmp_path):
+    state_file = tmp_path / "automation_state.json"
+    processed = tmp_path / "processed"
+    (processed / "Northshore College - Fall 2026 eNL").mkdir(parents=True)
+
+    text = run_state.format_status(state_file, processed_root=processed)
+
+    assert "Processed sends: 1" in text
+    assert "Northshore College - Fall 2026 eNL: processed folder present" in text

@@ -114,7 +114,7 @@ def draft_id_for(state_path: str | Path, send_key: str) -> str | None:
     return entry.get("draft_id") if entry else None
 
 
-def format_status(state_path: str | Path) -> str:
+def format_status(state_path: str | Path, *, processed_root: str | Path | None = None) -> str:
     state = load_state(state_path)
     lines = [f"Last run: {state.get('last_run') or 'never'}"]
 
@@ -127,10 +127,21 @@ def format_status(state_path: str | Path) -> str:
             f"seen {entry.get('seen_count')}x)"
         )
 
-    processed = state.get("processed", {})
+    processed = dict(state.get("processed", {}))
+    if processed_root is not None:
+        root = Path(processed_root)
+        if root.is_dir():
+            for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+                processed.setdefault(
+                    folder.name,
+                    {"job_id": None, "last_seen": None, "folder_present": True},
+                )
     lines.append(f"Processed sends: {len(processed)}")
     for name, entry in sorted(processed.items()):
-        lines.append(f"  {name}: job {entry.get('job_id')} (last seen {entry.get('last_seen')})")
+        if entry.get("job_id"):
+            lines.append(f"  {name}: job {entry.get('job_id')} (last seen {entry.get('last_seen')})")
+        else:
+            lines.append(f"  {name}: processed folder present")
 
     drafts = state.get("drafts", {})
     lines.append(f"Drafted reports: {len(drafts)}")

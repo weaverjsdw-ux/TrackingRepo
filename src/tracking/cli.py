@@ -213,7 +213,7 @@ def cmd_run(args) -> int:
 
 def cmd_status(_args) -> int:
     from . import run_state
-    print(run_state.format_status(_state_path()))
+    print(run_state.format_status(_state_path(), processed_root=_drop_root() / "processed"))
     return 0
 
 
