@@ -18,6 +18,8 @@ sd_*.csv
 # Local intake working dirs (real attachments = PII) — never commit.
 drop/
 **/drop/
+contacts.csv
+.automation_state.json
 # Per-run logs (may contain client names/counts).
 logs/
 
@@ -34,6 +36,7 @@ client_secret*.json
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest_tmp/
 .venv/
 venv/
 *.egg-info/

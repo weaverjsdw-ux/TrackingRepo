@@ -17,15 +17,21 @@ Mark-processed (operator decision): remove the intake label from the message.
 from __future__ import annotations
 
 import base64
+import mimetypes
 import os
+from email.message import EmailMessage as MimeMessage
 from pathlib import Path
 
 from .intake import Attachment, EmailMessage
+from .drafts import DraftEmail
 
-# modify = read + remove labels (mark-processed). That's all the tool needs; it
-# does not send email. (An existing token may still carry an extra granted scope
-# from earlier work — harmless; a fresh `authorize` will request modify only.)
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+# modify = read + remove labels (mark-processed); compose = create drafts only.
+# This adapter never sends email. Older tokens may need reauthorization to add
+# the compose scope.
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
 
 
 class GmailSource:
@@ -77,6 +83,14 @@ class GmailSource:
             userId="me", id=message_id,
             body={"removeLabelIds": [self._label_id(label)]},
         ).execute()
+
+    def create_draft(self, draft: DraftEmail) -> str:
+        """Create a Gmail draft and return its draft id. This never sends."""
+        resp = self._svc().users().drafts().create(
+            userId="me",
+            body={"message": {"raw": _build_draft_message(draft)}},
+        ).execute()
+        return resp["id"]
 
     # --- internals -------------------------------------------------------------
 
@@ -178,3 +192,23 @@ def _walk_parts(payload: dict):
         part = stack.pop()
         yield part
         stack.extend(part.get("parts", []))
+
+
+def _build_draft_message(draft: DraftEmail) -> str:
+    """Build Gmail's base64url raw MIME message payload."""
+    msg = MimeMessage()
+    msg["To"] = ", ".join(draft.to)
+    msg["Subject"] = draft.subject
+    msg.set_content(draft.body)
+
+    for path in draft.attachments:
+        ctype, _ = mimetypes.guess_type(path.name)
+        maintype, subtype = (ctype or "application/octet-stream").split("/", 1)
+        msg.add_attachment(
+            path.read_bytes(),
+            maintype=maintype,
+            subtype=subtype,
+            filename=path.name,
+        )
+
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
