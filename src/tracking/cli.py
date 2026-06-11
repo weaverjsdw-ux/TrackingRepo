@@ -151,11 +151,19 @@ def cmd_write(args) -> int:
                                  fill_blanks_only=not getattr(args, "force", False))
             # Create the renamed report folder (idempotent: skip if already filed).
             out = reports_dir / result.identity.folder_name
-            if out.exists():
-                filed = "report folder exists"
-            else:
+            expected_names = [
+                name for _source, name in filing.planned_renamed(result, summary)
+            ]
+            if not out.exists():
                 names = filing.write_renamed(result, summary, out)
                 filed = f"filed {len(names)} renamed files -> {out}"
+            else:
+                missing_names = [name for name in expected_names if not (out / name).is_file()]
+                if missing_names:
+                    filing.write_renamed(result, summary, out)
+                    filed = f"repaired report folder with {len(missing_names)} missing files -> {out}"
+                else:
+                    filed = "report folder exists"
             print(f"{folder.name}: wrote {len(written)} cells; {filed}")
         except Exception as exc:  # noqa: BLE001 - batch command reports per-folder blockers
             print(f"{folder.name}: WRITE ERROR: {exc}")

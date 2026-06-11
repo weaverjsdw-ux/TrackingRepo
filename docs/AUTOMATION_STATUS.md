@@ -12,7 +12,7 @@ Last reviewed: 2026-06-11
   write plan.
 - Sheet write-back updates the configured Google Sheet with fill-blanks-only
   safety by default.
-- Filing creates the renamed report folder for each processed send.
+- Filing creates or repairs the renamed report folder for each processed send.
 - Gmail report delivery creates drafts only, never sends, using `contacts.csv`
   for routing and local state for draft idempotency. `draft-reports --dry-run`
   validates recipients and finished attachment names without touching Gmail;

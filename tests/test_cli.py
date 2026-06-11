@@ -10,7 +10,39 @@ import shutil
 from tracking import cli
 from tracking import intake, run_state
 from tracking import naming
+from tracking import sheets_writer
 from tracking.intake import StagedSend
+
+
+_SHEET_HEADERS = [
+    "", "Client", "Type", "Issue #",
+    "# Total sent", "# Delivered", "# Unique clicks",
+    "Booklet landing page unique clicks", "# Total opens", "# Unique opens",
+    "Unique\nopen rate %", "Unique click-through %", "Subject line",
+    "Actual ... send date",
+]
+
+
+class FakeSheetsWriter:
+    def __init__(self, *args, **kwargs):
+        row = [""] * len(_SHEET_HEADERS)
+        row[1] = "Northshore College"
+        row[2] = "eNL"
+        row[_SHEET_HEADERS.index("Actual ... send date")] = "10/2/2026"
+        self.grid = [
+            [""] * len(_SHEET_HEADERS),
+            [""] * len(_SHEET_HEADERS),
+            _SHEET_HEADERS[:],
+            row,
+        ]
+
+    def get_values(self):
+        return [row[:] for row in self.grid]
+
+    def update_cell(self, row, col, value):
+        while len(self.grid[row]) <= col:
+            self.grid[row].append("")
+        self.grid[row][col] = str(value)
 
 
 def test_load_dotenv(tmp_path, monkeypatch):
@@ -56,6 +88,31 @@ def test_write_continues_after_one_processed_folder_errors(
     assert rc == 1
     assert "A Bad Send: WRITE ERROR:" in out
     assert f"{synthetic_send.name}: DRY-RUN sheet values" in out
+
+
+def test_write_commit_repairs_existing_report_folder_missing_csvs(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    identity = naming.parse_send_identity(synthetic_send.name)
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    reports_dir = tmp_path / "reports"
+    existing = reports_dir / synthetic_send.name
+    existing.mkdir(parents=True)
+    raw_pdf = next(synthetic_send.glob("*.pdf"))
+    shutil.copy2(raw_pdf, existing / naming.finished_pdf_name(identity))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    monkeypatch.setattr(sheets_writer, "GoogleSheetsWriter", FakeSheetsWriter)
+
+    rc = cli.main(["write", "--commit"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "repaired report folder" in out
+    assert naming.finished_pdf_name(identity) in [path.name for path in existing.iterdir()]
+    assert any(path.name.endswith(".csv") for path in existing.iterdir())
 
 
 def test_status_prints_automation_state(tmp_path, monkeypatch, capsys):
