@@ -59,6 +59,23 @@ def test_status_prints_automation_state(tmp_path, monkeypatch, capsys):
     assert "job 555111" in out
 
 
+def test_status_reports_missing_contacts_as_draft_blocker(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("CONTACTS_CSV", str(tmp_path / "missing-contacts.csv"))
+
+    rc = cli.main(["status"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Draft readiness: blocked" in out
+    assert "Contact file not found" in out
+
+
 def test_pull_suppresses_unchanged_pending_details(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DROP_ROOT", str(tmp_path))
