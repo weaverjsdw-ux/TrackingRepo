@@ -104,6 +104,7 @@ def test_stage_artifacts_blocks_incomplete_artifact_set(tmp_path):
         )
 
     assert not (tmp_path / "processed" / identity.folder_name).exists()
+    assert not (tmp_path / "sfmc" / identity.folder_name).exists()
 
 
 def test_stage_send_fetches_artifacts_from_source_adapter(tmp_path, synthetic_send):

@@ -122,16 +122,21 @@ def stage_artifacts(
     if folder.exists():
         shutil.rmtree(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    for artifact in artifacts:
-        (folder / artifact.filename).write_bytes(artifact.data)
-
     try:
-        result = process_folder(folder, identity)
-    except Exception as exc:  # noqa: BLE001 - operator-facing feasibility gate
-        raise SfmcConfigError(f"incomplete SFMC artifact set: {exc}") from exc
-    ok, missing = assess_completeness(result)
-    if not ok:
-        raise SfmcConfigError(f"incomplete SFMC artifact set: missing {missing}")
+        for artifact in artifacts:
+            (folder / artifact.filename).write_bytes(artifact.data)
+
+        try:
+            result = process_folder(folder, identity)
+        except Exception as exc:  # noqa: BLE001 - operator-facing feasibility gate
+            raise SfmcConfigError(f"incomplete SFMC artifact set: {exc}") from exc
+        ok, missing = assess_completeness(result)
+        if not ok:
+            raise SfmcConfigError(f"incomplete SFMC artifact set: missing {missing}")
+    except Exception:
+        if folder.exists():
+            shutil.rmtree(folder)
+        raise
 
     processed = root / "processed" / identity.folder_name
     if processed.exists():
