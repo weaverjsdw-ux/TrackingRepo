@@ -33,6 +33,26 @@ def _copy_runner(tmp_path):
     return scripts / "run_scheduled.ps1"
 
 
+def _cscript():
+    if os.name != "nt":
+        pytest.skip("Windows Script Host wrapper is Windows-only")
+    exe = shutil.which("cscript")
+    if exe is None:
+        pytest.skip("cscript is not available")
+    return exe
+
+
+def _copy_hidden_runner(tmp_path):
+    from conftest import REPO_ROOT
+
+    root = tmp_path / "repo"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    source = REPO_ROOT / "scripts" / "run_scheduled_hidden.vbs"
+    shutil.copy(source, scripts / "run_scheduled_hidden.vbs")
+    return scripts / "run_scheduled_hidden.vbs"
+
+
 def test_run_scheduled_returns_python_exit_code(tmp_path):
     runner = _copy_runner(tmp_path)
     fake_python = tmp_path / "fake-python.cmd"
@@ -64,3 +84,19 @@ def test_run_scheduled_returns_python_exit_code(tmp_path):
     assert proc.returncode == 17
     log = tmp_path / "repo" / "logs" / "run.log"
     assert "fake cli failed" in log.read_text(encoding="utf-8")
+
+
+def test_hidden_runner_returns_powershell_exit_code(tmp_path):
+    hidden_runner = _copy_hidden_runner(tmp_path)
+    ps1 = hidden_runner.parent / "run_scheduled.ps1"
+    ps1.write_text("exit 17\r\n", encoding="ascii")
+
+    proc = subprocess.run(
+        [_cscript(), "//NoLogo", str(hidden_runner)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 17
