@@ -70,9 +70,11 @@ Scheduler wrapper:
 
 The scheduled task calls `scripts/run_scheduled_hidden.vbs`, which launches
 `scripts/run_scheduled.ps1` with no visible console window and preserves the
-runner exit code for Task Scheduler/Power Automate failure notifications. Power
-Automate can wrap the same command for notifications, but should not own
-parsing, naming, Sheet writes, or draft creation logic.
+runner exit code for Task Scheduler/Power Automate failure notifications. After
+each scheduled cycle it also writes `logs/status.json` from `status --json`, so
+a wrapper can read pending counts and draft blockers without scraping
+`run.log`. Power Automate can wrap the same command for notifications, but
+should not own parsing, naming, Sheet writes, or draft creation logic.
 
 See `docs/AUTOMATION_STATUS.md` for the current automated/not-automated
 boundary, live blockers, Power Automate search evidence, and review-gate status.

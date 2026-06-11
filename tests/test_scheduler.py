@@ -7,6 +7,7 @@ must propagate the Python CLI exit code instead of only writing errors to a log.
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
 
@@ -120,6 +121,44 @@ def test_run_scheduled_ignores_invalid_log_cap(tmp_path):
     text = log.read_text(encoding="utf-8")
     assert "WARN: invalid TRACKING_RUN_LOG_MAX_BYTES" in text
     assert "fake cli ok" in text
+
+
+def test_run_scheduled_writes_status_json_snapshot_and_preserves_run_exit(tmp_path):
+    runner = _copy_runner(tmp_path)
+    fake_python = tmp_path / "fake-python.cmd"
+    fake_python.write_text(
+        "@echo off\r\n"
+        "if \"%3\"==\"status\" (\r\n"
+        "  echo {\"pending_count\":4,\"draft_readiness\":{\"state\":\"blocked\"}}\r\n"
+        "  exit /b 0\r\n"
+        ")\r\n"
+        "echo fake cli failed\r\n"
+        "exit /b 17\r\n",
+        encoding="ascii",
+    )
+    env = os.environ.copy()
+    env["TRACKING_PYTHON_EXE"] = str(fake_python)
+
+    proc = subprocess.run(
+        [
+            _powershell(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 17
+    status = json.loads((tmp_path / "repo" / "logs" / "status.json").read_text(encoding="utf-8-sig"))
+    assert status["pending_count"] == 4
+    assert status["draft_readiness"]["state"] == "blocked"
 
 
 def test_hidden_runner_returns_powershell_exit_code(tmp_path):

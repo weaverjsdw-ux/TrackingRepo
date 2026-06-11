@@ -32,6 +32,9 @@ Last reviewed: 2026-06-11
   Task Scheduler or Power Automate failure notifications.
 - Scheduler logs rotate through `logs/run.log.1` when `logs/run.log` exceeds the
   configured byte cap.
+- Scheduled runs refresh `logs/status.json` from `python -m tracking.cli status
+  --json`, giving Power Automate or other wrappers structured pending and draft
+  blocker data without scraping the text log.
 - SFMC/ExactTarget API automation is gated behind the same probe used by
   `sfmc-probe`; `sfmc-stage` runs that gate before fetching artifacts. Complete
   SFMC artifact sets are validated through the normal parser and promoted into

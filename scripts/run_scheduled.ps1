@@ -14,6 +14,7 @@ if ($env:TRACKING_PYTHON_EXE) {
 $logDir = Join-Path $root "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 $log = Join-Path $logDir "run.log"
+$statusJson = Join-Path $logDir "status.json"
 $maxBytes = 2MB
 $logCapWarning = $null
 if ($env:TRACKING_RUN_LOG_MAX_BYTES) {
@@ -44,6 +45,19 @@ try {
     $exitCode = $LASTEXITCODE
     $output | Add-Content $log
     if ($null -eq $exitCode) { $exitCode = 0 }
+    try {
+        $statusOutput = & $py -m tracking.cli status --json *>&1
+        $statusExitCode = $LASTEXITCODE
+        if ($null -eq $statusExitCode) { $statusExitCode = 0 }
+        if ($statusExitCode -eq 0) {
+            $statusOutput | Set-Content -Path $statusJson -Encoding UTF8
+        } else {
+            "WARN: status --json exited with code $statusExitCode; status snapshot not updated" | Add-Content $log
+            $statusOutput | Add-Content $log
+        }
+    } catch {
+        "WARN: status --json failed; status snapshot not updated: $_" | Add-Content $log
+    }
     if ($exitCode -ne 0) {
         "ERROR: CLI exited with code $exitCode" | Add-Content $log
     }

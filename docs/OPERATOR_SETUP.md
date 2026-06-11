@@ -81,6 +81,7 @@ the stable landmarks — look for the nearest equivalent if wording differs.
    folders, existing draft IDs, and draft-readiness blockers without reading the
    full run log. Use `python -m tracking.cli status --json` if Power Automate
    or another wrapper needs machine-readable counts and blocker details.
+   Scheduled runs also refresh `logs/status.json` with that same JSON snapshot.
 
 ---
 
