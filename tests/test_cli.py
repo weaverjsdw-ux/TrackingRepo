@@ -162,6 +162,7 @@ def test_draft_reports_dry_run_plans_without_gmail(
     assert rc == 0
     out = capsys.readouterr().out
     assert "DRY-RUN draft to pc@example.com" in out
+    assert "Engagement Tracking — Northshore College Fall 2026 eNL" in out
     assert "Engagement Tracking Report.pdf" in out
     assert not reports_dir.exists()
 

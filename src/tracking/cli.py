@@ -160,7 +160,7 @@ def cmd_write(args) -> int:
 
 
 def cmd_draft_reports(args) -> int:
-    from . import contacts, drafts, filing, overview, pipeline
+    from . import contacts, drafts, filing, naming, overview, pipeline
     from .identify import FileType
 
     processed = _drop_root() / "processed"
@@ -200,8 +200,9 @@ def cmd_draft_reports(args) -> int:
                     raise drafts.DraftError("official overview PDF is not in the report package")
                 print(
                     f"{result.identity.folder_name}: DRY-RUN draft to "
-                    f"{contact.pc_email} with {len(attachment_names)} "
-                    f"attachments: {', '.join(attachment_names)}"
+                    f"{contact.pc_email} subject "
+                    f"{naming.email_subject(result.identity)!r} with "
+                    f"{len(attachment_names)} attachments: {', '.join(attachment_names)}"
                 )
                 continue
             if not out.exists():
