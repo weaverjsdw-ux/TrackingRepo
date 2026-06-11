@@ -115,9 +115,13 @@ def stage_artifacts(
     drop_root: str | Path,
     identity: SendIdentity,
     artifacts: list[SfmcArtifact],
+    *,
+    replace_existing: bool = False,
 ) -> Path:
     """Stage a complete SFMC artifact set into the canonical processed folder."""
     root = Path(drop_root)
+    processed = _processed_folder(root, identity)
+    _check_existing_processed(processed, replace_existing=replace_existing)
     folder = root / "sfmc" / identity.folder_name
     if folder.exists():
         shutil.rmtree(folder)
@@ -138,7 +142,6 @@ def stage_artifacts(
             shutil.rmtree(folder)
         raise
 
-    processed = root / "processed" / identity.folder_name
     if processed.exists():
         shutil.rmtree(processed)
     processed.parent.mkdir(parents=True, exist_ok=True)
@@ -151,9 +154,33 @@ def stage_send(
     identity: SendIdentity,
     client: SfmcArtifactClient,
     send_id: str,
+    *,
+    replace_existing: bool = False,
 ) -> Path:
     """Fetch API artifacts and stage them as a normal processable send folder."""
-    return stage_artifacts(drop_root, identity, client.fetch_artifacts(send_id))
+    root = Path(drop_root)
+    _check_existing_processed(
+        _processed_folder(root, identity),
+        replace_existing=replace_existing,
+    )
+    return stage_artifacts(
+        root,
+        identity,
+        client.fetch_artifacts(send_id),
+        replace_existing=replace_existing,
+    )
+
+
+def _processed_folder(root: Path, identity: SendIdentity) -> Path:
+    return root / "processed" / identity.folder_name
+
+
+def _check_existing_processed(processed: Path, *, replace_existing: bool) -> None:
+    if processed.exists() and not replace_existing:
+        raise SfmcConfigError(
+            f"Processed folder already exists: {processed}. "
+            "Rerun with --force only if you intend to replace it."
+        )
 
 
 class RealSfmcClient:

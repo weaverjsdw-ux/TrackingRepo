@@ -30,7 +30,8 @@ Last reviewed: 2026-06-11
   only runs after explicit URL templates are configured and the probe passes.
   Complete SFMC artifact sets are validated through the normal parser and
   promoted into `drop/processed` so existing Sheet, draft, and status commands
-  consume them through the same path as Gmail intake.
+  consume them through the same path as Gmail intake. Existing processed folders
+  are not replaced unless `sfmc-stage --force` is used deliberately.
 - Scheduled `run --drafts` creates drafts only after pull and Sheet write-back
   complete cleanly in the same run.
 

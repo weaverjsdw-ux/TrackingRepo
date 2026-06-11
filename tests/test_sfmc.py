@@ -93,6 +93,37 @@ def test_stage_artifacts_writes_canonical_processed_folder(tmp_path, synthetic_s
     assert not (tmp_path / "sfmc" / "Northshore College - Fall 2026 eNL").exists()
 
 
+def test_stage_artifacts_blocks_existing_processed_folder_without_force(tmp_path, synthetic_send):
+    identity = SendIdentity("Northshore College", "Fall", "2026", "eNL")
+    existing = tmp_path / "processed" / identity.folder_name
+    existing.mkdir(parents=True)
+    (existing / "keep.txt").write_text("do not overwrite", encoding="utf-8")
+
+    with pytest.raises(sfmc.SfmcConfigError, match="already exists"):
+        sfmc.stage_artifacts(tmp_path, identity, _artifacts_from(synthetic_send))
+
+    assert (existing / "keep.txt").read_text(encoding="utf-8") == "do not overwrite"
+    assert not (tmp_path / "sfmc" / identity.folder_name).exists()
+
+
+def test_stage_artifacts_force_replaces_existing_processed_folder(tmp_path, synthetic_send):
+    identity = SendIdentity("Northshore College", "Fall", "2026", "eNL")
+    existing = tmp_path / "processed" / identity.folder_name
+    existing.mkdir(parents=True)
+    (existing / "old.txt").write_text("replace me", encoding="utf-8")
+
+    folder = sfmc.stage_artifacts(
+        tmp_path,
+        identity,
+        _artifacts_from(synthetic_send),
+        replace_existing=True,
+    )
+
+    assert folder == existing
+    assert not (folder / "old.txt").exists()
+    assert (folder / "export_1001.csv").is_file()
+
+
 def test_stage_artifacts_blocks_incomplete_artifact_set(tmp_path):
     identity = SendIdentity("Northshore College", "Fall", "2026", "eNL")
 

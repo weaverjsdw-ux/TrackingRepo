@@ -307,7 +307,17 @@ def cmd_sfmc_stage(args) -> int:
         year=args.year,
         type=args.type,
     )
-    folder = sfmc.stage_send(_drop_root(), identity, _sfmc_client(), args.send_id)
+    try:
+        folder = sfmc.stage_send(
+            _drop_root(),
+            identity,
+            _sfmc_client(),
+            args.send_id,
+            replace_existing=getattr(args, "force", False),
+        )
+    except sfmc.SfmcConfigError as exc:
+        print(f"SFMC STAGE ERROR: {exc}")
+        return 1
     count = len([p for p in folder.iterdir() if p.is_file()])
     label = "artifact" if count == 1 else "artifacts"
     print(f"{identity.folder_name}: staged {count} SFMC {label} -> {folder}")
@@ -345,6 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     ss.add_argument("--season", required=True, help="send season")
     ss.add_argument("--year", required=True, help="send year")
     ss.add_argument("--type", required=True, help="send type, for example eNL or ePC")
+    ss.add_argument("--force", action="store_true",
+                    help="replace an existing processed folder for this send")
     ss.set_defaults(func=cmd_sfmc_stage)
 
     args = parser.parse_args(argv)

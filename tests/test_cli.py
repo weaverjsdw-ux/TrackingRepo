@@ -435,3 +435,38 @@ def test_sfmc_stage_uses_fake_source_adapter(tmp_path, monkeypatch, capsys, synt
         synthetic_send / "export_1001.csv"
     ).read_bytes()
     assert "staged 8 SFMC artifacts" in capsys.readouterr().out
+
+
+def test_sfmc_stage_reports_existing_processed_folder_without_force(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    class FakeSfmcClient:
+        def fetch_artifacts(self, send_id):
+            from tracking import sfmc
+            return [
+                sfmc.SfmcArtifact(path.name, path.read_bytes())
+                for path in sorted(synthetic_send.iterdir())
+                if path.is_file()
+            ]
+
+    existing = tmp_path / "drop" / "processed" / "Northshore College - Fall 2026 eNL"
+    existing.mkdir(parents=True)
+    (existing / "keep.txt").write_text("do not overwrite", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setattr(cli, "_sfmc_client", lambda: FakeSfmcClient(), raising=False)
+
+    rc = cli.main([
+        "sfmc-stage",
+        "--send-id", "12345",
+        "--client", "Northshore College",
+        "--season", "Fall",
+        "--year", "2026",
+        "--type", "eNL",
+    ])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "SFMC STAGE ERROR" in out
+    assert "already exists" in out
+    assert (existing / "keep.txt").read_text(encoding="utf-8") == "do not overwrite"
