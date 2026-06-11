@@ -207,7 +207,12 @@ def cmd_run(args) -> int:
     from argparse import Namespace
     rc_pull = cmd_pull(args)
     rc_write = cmd_write(Namespace(commit=True))
-    rc_draft = cmd_draft_reports(args) if getattr(args, "drafts", False) else 0
+    rc_draft = 0
+    if getattr(args, "drafts", False):
+        if rc_pull or rc_write:
+            print("Skipping draft creation because pull/write did not complete cleanly.")
+        else:
+            rc_draft = cmd_draft_reports(args)
     return rc_pull or rc_write or rc_draft
 
 

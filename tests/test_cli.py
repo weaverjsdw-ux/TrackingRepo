@@ -137,6 +137,31 @@ def test_draft_reports_missing_contact_file_blocks_cleanly(
     assert "DRAFT ERROR: Contact file not found" in capsys.readouterr().out
 
 
+def test_run_drafts_skips_drafts_when_write_fails(monkeypatch):
+    calls = []
+
+    def fake_pull(args):
+        calls.append("pull")
+        return 0
+
+    def fake_write(args):
+        calls.append("write")
+        return 1
+
+    def fake_draft(args):
+        calls.append("draft")
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_pull", fake_pull)
+    monkeypatch.setattr(cli, "cmd_write", fake_write)
+    monkeypatch.setattr(cli, "cmd_draft_reports", fake_draft)
+
+    rc = cli.main(["run", "--drafts"])
+
+    assert rc == 1
+    assert calls == ["pull", "write"]
+
+
 def test_sfmc_probe_prints_fake_probe_result(monkeypatch, capsys):
     class FakeSfmcClient:
         def authenticate(self):
