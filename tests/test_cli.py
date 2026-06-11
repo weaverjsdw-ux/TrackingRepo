@@ -181,6 +181,44 @@ def test_draft_reports_creates_engagement_draft_once(
                for p in writer.created[0].attachments)
 
 
+def test_draft_reports_repairs_existing_report_folder_missing_pdf(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    class FakeDraftWriter:
+        def __init__(self):
+            self.created = []
+
+        def create_draft(self, draft):
+            self.created.append(draft)
+            return "draft-1"
+
+    writer = FakeDraftWriter()
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    reports_dir = tmp_path / "reports"
+    existing = reports_dir / synthetic_send.name
+    existing.mkdir(parents=True)
+    (existing / "leftover.csv").write_text("partial", encoding="utf-8")
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+    monkeypatch.setattr(cli, "_draft_writer", lambda: writer)
+
+    rc = cli.main(["draft-reports"])
+
+    assert rc == 0
+    assert "created draft draft-1" in capsys.readouterr().out
+    assert any(p.name.endswith("Engagement Tracking Report.pdf")
+               for p in writer.created[0].attachments)
+
+
 def test_draft_reports_dry_run_plans_without_gmail(
     tmp_path, monkeypatch, capsys, synthetic_send
 ):
