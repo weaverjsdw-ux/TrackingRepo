@@ -33,9 +33,11 @@ Last reviewed: 2026-06-11
   ignored by the engagement pipeline.
 - Official overview PDFs remain required. Sends without an overview PDF stay
   pending instead of being guessed from partial data.
+- Draft creation is blocked until a real, git-ignored `contacts.csv` exists.
+  `contacts.example.csv` is committed as the operator template.
 - Power Automate Desktop is not part of core business logic. It should only wrap
   the Python CLI for notifications or operator convenience.
-- CodeRabbit review cannot run until a GitHub PR exists.
+- CodeRabbit did not leave actionable PR feedback on the merged automation PR.
 
 ## Current Live State
 
@@ -49,6 +51,10 @@ Last reviewed: 2026-06-11
 The pending JobIDs have export-message breadcrumbs in status output, but no
 local staged files remain in `drop/inbox`; the blocker is the missing overview
 PDF email/artifact, not a local file move.
+
+`contacts.csv` is not present in the checkout, so Gmail draft creation cannot be
+accepted live yet. Add the real client routing file from `contacts.example.csv`
+before running `python -m tracking.cli draft-reports` or `run --drafts`.
 
 ## Power Automate Search Evidence
 
@@ -67,14 +73,13 @@ Scheduler or Power Automate as an optional wrapper.
 
 ## Review Gate
 
-Branch `automate-engagement-completion` is pushed. PR creation is currently
-blocked by GitHub tooling permissions:
+PR #1, `Automate engagement completion`, has been merged into `main`:
+<https://github.com/weaverjsdw-ux/TrackingRepo/pull/1>
 
-- GitHub connector PR creation returns `403 Resource not accessible by
-  integration`.
-- GitHub CLI (`gh`) is not installed.
-- No `GH_TOKEN`, `GITHUB_TOKEN`, or `GITHUB_PAT` environment variable is present.
-- `git credential fill` did not expose a reusable GitHub credential.
+Review evidence:
 
-Create the PR from:
-<https://github.com/weaverjsdw-ux/TrackingRepo/pull/new/automate-engagement-completion>
+- PR comments: none.
+- PR reviews: none.
+- PR review threads: none.
+- CodeRabbit did not leave actionable feedback.
+- No workflow runs were visible through the GitHub connector for the PR head SHA.
