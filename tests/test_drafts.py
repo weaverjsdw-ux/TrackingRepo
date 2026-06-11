@@ -62,6 +62,18 @@ def test_build_engagement_draft_ignores_lead_score_files(tmp_path):
     assert not any("Lead Scoring" in p.name for p in draft.attachments)
 
 
+def test_build_engagement_draft_ignores_unrelated_report_folder_files(tmp_path):
+    folder = _report_dir(tmp_path)
+    (folder / "leftover.csv").write_text("partial", encoding="utf-8")
+    (folder / "old overview.pdf").write_text("old", encoding="utf-8")
+
+    draft = build_engagement_draft(IDENTITY, folder, CONTACT)
+
+    names = [p.name for p in draft.attachments]
+    assert "leftover.csv" not in names
+    assert "old overview.pdf" not in names
+
+
 def test_create_engagement_draft_is_idempotent(tmp_path):
     state_file = tmp_path / "state.json"
     writer = FakeDraftWriter()

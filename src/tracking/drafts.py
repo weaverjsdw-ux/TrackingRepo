@@ -51,6 +51,7 @@ def build_engagement_draft(
         p for p in folder.iterdir()
         if p.is_file()
         and p.suffix.lower() in {".csv", ".pdf"}
+        and p.name.startswith(f"{identity.prefix} - ")
         and "lead scoring" not in p.name.lower()
         and not p.name.lower().startswith("sd_")
     )
