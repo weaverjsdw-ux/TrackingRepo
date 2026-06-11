@@ -246,7 +246,7 @@ def cmd_run(args) -> int:
 
 
 def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
-    from . import contacts, pipeline
+    from . import contacts, filing, overview, pipeline
     from .identify import FileType
 
     if not processed_root.is_dir():
@@ -268,6 +268,8 @@ def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
             pdf = next((p.source for p in result.planned if p.type is FileType.OVERVIEW_PDF), None)
             if pdf is None:
                 raise RuntimeError("no overview PDF; cannot draft official report package")
+            summary = overview.parse_summary(pdf)
+            filing.planned_renamed(result, summary)
             contacts.report_contact_for(contact_rows, result.identity)
             ready += 1
         except Exception as exc:  # noqa: BLE001 - operator-facing status detail
