@@ -25,6 +25,7 @@ Operator commands:
 python -m tracking.cli pull
 python -m tracking.cli write --commit
 python -m tracking.cli draft-reports --dry-run
+python -m tracking.cli draft-reports --dry-run --prepare-files
 python -m tracking.cli draft-reports
 python -m tracking.cli status
 python -m tracking.cli run                     # scheduled pull + Sheet write
@@ -40,7 +41,9 @@ compose permission; rerun `authorize` if an older token only has intake access.
 The contact CSV is engagement-only: extra lead-score/HIPAA routing fields are
 rejected until that later workflow is designed.
 Run `draft-reports --dry-run` first to validate recipients and finished
-attachment names without creating Gmail drafts.
+attachment names without creating Gmail drafts. Add `--prepare-files` to that
+dry run when you also want to write or repair the local report folders without
+touching Gmail.
 `status` reports draft readiness, including missing or invalid contact routing,
 without creating drafts.
 

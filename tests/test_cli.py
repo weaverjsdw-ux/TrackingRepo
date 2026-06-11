@@ -315,6 +315,46 @@ def test_draft_reports_dry_run_plans_without_gmail(
     assert not reports_dir.exists()
 
 
+def test_draft_reports_dry_run_prepare_files_writes_report_folder_without_gmail(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+    reports_dir = tmp_path / "reports"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+    monkeypatch.setattr(cli, "_draft_writer", lambda: pytest.fail("Gmail should not be touched"))
+
+    rc = cli.main(["draft-reports", "--dry-run", "--prepare-files"])
+
+    out = capsys.readouterr().out
+    report_folder = reports_dir / synthetic_send.name
+    assert rc == 0
+    assert "DRY-RUN prepared" in out
+    assert report_folder.is_dir()
+    assert (report_folder / "Northshore College Fall 2026 eNL - Engagement Tracking Report.pdf").is_file()
+    assert any(path.name.endswith(".csv") for path in report_folder.iterdir())
+
+
+def test_draft_reports_prepare_files_requires_dry_run(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setattr(cli, "_draft_writer", lambda: pytest.fail("Gmail should not be touched"))
+
+    rc = cli.main(["draft-reports", "--prepare-files"])
+
+    assert rc == 1
+    assert "--prepare-files requires --dry-run" in capsys.readouterr().out
+
+
 def test_draft_reports_missing_contact_file_blocks_cleanly(
     tmp_path, monkeypatch, capsys, synthetic_send
 ):

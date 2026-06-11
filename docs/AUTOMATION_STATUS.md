@@ -15,7 +15,9 @@ Last reviewed: 2026-06-11
 - Filing creates the renamed report folder for each processed send.
 - Gmail report delivery creates drafts only, never sends, using `contacts.csv`
   for routing and local state for draft idempotency. `draft-reports --dry-run`
-  validates recipients and finished attachment names without touching Gmail.
+  validates recipients and finished attachment names without touching Gmail;
+  `draft-reports --dry-run --prepare-files` also writes/repairs the local
+  report folders while still avoiding Gmail.
 - Run state tracks last run, pending JobIDs, processed sends, and draft IDs.
   `python -m tracking.cli status` shows pending reasons, message counts,
   folder keys, processed folders, draft IDs, and draft-readiness blockers such

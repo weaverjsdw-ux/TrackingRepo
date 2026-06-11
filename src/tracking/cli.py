@@ -167,6 +167,11 @@ def cmd_draft_reports(args) -> int:
     from . import contacts, drafts, filing, naming, overview, pipeline
     from .identify import FileType
 
+    dry_run = getattr(args, "dry_run", False)
+    if getattr(args, "prepare_files", False) and not dry_run:
+        print("DRAFT ERROR: --prepare-files requires --dry-run")
+        return 1
+
     processed = _drop_root() / "processed"
     if not processed.is_dir():
         print(f"No processed sends at {processed}.")
@@ -179,7 +184,6 @@ def cmd_draft_reports(args) -> int:
         print(f"DRAFT ERROR: {exc}")
         return 1
     reports_dir = Path(os.environ.get("REPORTS_DIR", str(Path.cwd().parent)))
-    dry_run = getattr(args, "dry_run", False)
     writer = None if dry_run else _draft_writer()
 
     rc = 0
@@ -192,26 +196,30 @@ def cmd_draft_reports(args) -> int:
             summary = overview.parse_summary(pdf)
             out = reports_dir / result.identity.folder_name
             contact = contacts.report_contact_for(contact_rows, result.identity)
+            expected_names = [
+                name for _source, name in filing.planned_renamed(result, summary)
+            ]
             if dry_run:
-                attachment_names = [
-                    name for _source, name in filing.planned_renamed(result, summary)
-                ]
                 official_pdf = next(
-                    (name for name in attachment_names if name.endswith(".pdf")),
+                    (name for name in expected_names if name.endswith(".pdf")),
                     None,
                 )
                 if official_pdf is None:
                     raise drafts.DraftError("official overview PDF is not in the report package")
+                if getattr(args, "prepare_files", False):
+                    if not out.exists() or any(not (out / name).is_file() for name in expected_names):
+                        filing.write_renamed(result, summary, out)
+                    print(
+                        f"{result.identity.folder_name}: DRY-RUN prepared "
+                        f"{len(expected_names)} attachments -> {out}"
+                    )
                 print(
                     f"{result.identity.folder_name}: DRY-RUN draft to "
                     f"{contact.pc_email} subject "
                     f"{naming.email_subject(result.identity)!r} with "
-                    f"{len(attachment_names)} attachments: {', '.join(attachment_names)}"
+                    f"{len(expected_names)} attachments: {', '.join(expected_names)}"
                 )
                 continue
-            expected_names = [
-                name for _source, name in filing.planned_renamed(result, summary)
-            ]
             if not out.exists() or any(not (out / name).is_file() for name in expected_names):
                 filing.write_renamed(result, summary, out)
             assert writer is not None
@@ -343,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("draft-reports", help="create Gmail drafts for processed engagement reports")
     d.add_argument("--dry-run", action="store_true",
                    help="validate recipients and attachments without creating Gmail drafts")
+    d.add_argument("--prepare-files", action="store_true",
+                   help="with --dry-run, write/repair local report folders without touching Gmail")
     d.set_defaults(func=cmd_draft_reports)
     r = sub.add_parser("run", help="one cycle for scheduling: pull + write to the Sheet")
     r.add_argument("--drafts", action="store_true",
