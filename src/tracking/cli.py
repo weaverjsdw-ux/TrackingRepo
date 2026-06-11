@@ -293,8 +293,9 @@ def _format_draft_readiness(processed_root: Path, contacts_path: Path) -> str:
 
     if blockers:
         return "Draft readiness: blocked\n" + "\n".join(blockers)
-    label = "send" if ready == 1 else "sends"
-    return f"Draft readiness: ready ({ready} processed {label} have enabled contacts)"
+    if ready == 1:
+        return "Draft readiness: ready (1 processed send has enabled contact)"
+    return f"Draft readiness: ready ({ready} processed sends have enabled contacts)"
 
 
 def cmd_status(_args) -> int:
