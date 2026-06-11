@@ -21,6 +21,16 @@ _SHEET_HEADERS = [
     "Unique\nopen rate %", "Unique click-through %", "Subject line",
     "Actual ... send date",
 ]
+_INTAKE_JOB_ID = "555111"
+_INTAKE_EXPORTS = {
+    "export_1001.csv": "Send",
+    "export_1002.csv": "Open",
+    "export_1003.csv": "click",
+    "export_1004.csv": "click",
+    "export_1005.csv": "bounce",
+    "export_1006.csv": "unsub",
+}
+_INTAKE_PDF = "Job_770001_Overview_20260901.pdf"
 
 
 class FakeSheetsWriter:
@@ -43,6 +53,59 @@ class FakeSheetsWriter:
         while len(self.grid[row]) <= col:
             self.grid[row].append("")
         self.grid[row][col] = str(value)
+
+
+class FakeEmailAndDraftSource:
+    def __init__(self, messages):
+        self._messages = list(messages)
+        self.marked: list[str] = []
+        self.created_drafts = []
+
+    def fetch_labeled(self, label):
+        return [m for m in self._messages if m.id not in self.marked]
+
+    def mark_processed(self, message_id):
+        self.marked.append(message_id)
+
+    def create_draft(self, draft):
+        self.created_drafts.append(draft)
+        return f"draft-{len(self.created_drafts)}"
+
+
+def _attachment(folder, name):
+    return intake.Attachment(name, (folder / name).read_bytes())
+
+
+def _export_message(folder, message_id, filename, export_type):
+    body = (
+        f"Your file export is complete. Exported File: {filename} "
+        f"Exported Type: {export_type} Exported for - JobID: {_INTAKE_JOB_ID} "
+        "A file has been attached."
+    )
+    return intake.EmailMessage(
+        message_id,
+        "The export you requested is complete.",
+        (_attachment(folder, filename),),
+        body,
+    )
+
+
+def _overview_message(folder):
+    return intake.EmailMessage(
+        "overview",
+        "Northshore College Fall 2026 eNL - Engagement Tracking Report",
+        (_attachment(folder, _INTAKE_PDF),),
+        f"The PDF file for job {_INTAKE_JOB_ID} is attached.",
+    )
+
+
+def _tracking_messages(folder):
+    messages = [
+        _export_message(folder, f"m{i}", filename, export_type)
+        for i, (filename, export_type) in enumerate(_INTAKE_EXPORTS.items())
+    ]
+    messages.append(_overview_message(folder))
+    return messages
 
 
 def test_load_dotenv(tmp_path, monkeypatch):
@@ -476,6 +539,42 @@ def test_run_skips_write_and_drafts_when_pull_fails(monkeypatch, capsys):
     assert rc == 1
     assert calls == ["pull"]
     assert "Skipping write and draft creation" in capsys.readouterr().out
+
+
+def test_run_drafts_processes_one_send_end_to_end_with_fakes(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    source = FakeEmailAndDraftSource(_tracking_messages(synthetic_send))
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+    monkeypatch.setattr(cli, "_gmail_source", lambda: source)
+    monkeypatch.setattr(cli, "_draft_writer", lambda: source)
+    monkeypatch.setattr(sheets_writer, "GoogleSheetsWriter", FakeSheetsWriter)
+
+    first_rc = cli.main(["run", "--drafts"])
+    first_out = capsys.readouterr().out
+    second_rc = cli.main(["run", "--drafts"])
+    second_out = capsys.readouterr().out
+
+    report_folder = tmp_path / "reports" / synthetic_send.name
+    state = run_state.load_state(tmp_path / "drop" / run_state.STATE_FILE)
+    assert first_rc == 0 and second_rc == 0
+    assert "created draft draft-1" in first_out
+    assert "No new labeled messages to process." in second_out
+    assert len(source.created_drafts) == 1
+    assert len(source.marked) == len(_INTAKE_EXPORTS) + 1
+    assert (tmp_path / "drop" / "processed" / synthetic_send.name).is_dir()
+    assert (report_folder / "Northshore College Fall 2026 eNL - Engagement Tracking Report.pdf").is_file()
+    assert any(path.name.endswith(".csv") for path in report_folder.iterdir())
+    assert state["drafts"][synthetic_send.name]["draft_id"] == "draft-1"
 
 
 def test_sfmc_probe_prints_fake_probe_result(monkeypatch, capsys):
