@@ -71,7 +71,8 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 3. Leave drafts off until contact routing has been checked. Then rerun with
    `.\scripts\install_scheduled_task.ps1 -Drafts`.
 4. Use `python -m tracking.cli status` to review pending JobIDs, processed
-   folders, and existing draft IDs without reading the full run log.
+   folders, existing draft IDs, and draft-readiness blockers without reading the
+   full run log.
 
 ---
 
@@ -85,4 +86,4 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 Then run `python -m tracking.cli authorize`, `pull`, `write --commit`, and
 `draft-reports`. Install the scheduled task only after those commands work
 manually. Use `run --drafts` or `install_scheduled_task.ps1 -Drafts` only after
-contact routing has been checked.
+`python -m tracking.cli status` reports draft readiness.

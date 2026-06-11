@@ -17,14 +17,21 @@ Last reviewed: 2026-06-11
   for routing and local state for draft idempotency.
 - Run state tracks last run, pending JobIDs, processed sends, and draft IDs.
   `python -m tracking.cli status` shows pending reasons, message counts,
-  folder keys, processed folders, and draft IDs.
+  folder keys, processed folders, draft IDs, and draft-readiness blockers such
+  as missing or invalid contact routing.
 - Windows Task Scheduler can be installed with
   `.\scripts\install_scheduled_task.ps1`; it calls the hidden VBS wrapper, which
-  calls `python -m tracking.cli run`.
+  calls `python -m tracking.cli run` and preserves the runner exit code for
+  Task Scheduler or Power Automate failure notifications.
 - Scheduler logs rotate through `logs/run.log.1` when `logs/run.log` exceeds the
   configured byte cap.
 - SFMC/ExactTarget API automation is gated behind `sfmc-probe`; `sfmc-stage`
   only runs after explicit URL templates are configured and the probe passes.
+  Complete SFMC artifact sets are validated through the normal parser and
+  promoted into `drop/processed` so existing Sheet, draft, and status commands
+  consume them through the same path as Gmail intake.
+- Scheduled `run --drafts` creates drafts only after pull and Sheet write-back
+  complete cleanly in the same run.
 
 ## Not Automated Yet
 
@@ -47,14 +54,16 @@ Last reviewed: 2026-06-11
   this JobID`.
 - 5 processed send folders present.
 - 0 drafted reports.
+- Draft readiness blocked because `contacts.csv` is missing.
 
 The pending JobIDs have export-message breadcrumbs in status output, but no
 local staged files remain in `drop/inbox`; the blocker is the missing overview
 PDF email/artifact, not a local file move.
 
 `contacts.csv` is not present in the checkout, so Gmail draft creation cannot be
-accepted live yet. Add the real client routing file from `contacts.example.csv`
-before running `python -m tracking.cli draft-reports` or `run --drafts`.
+accepted live yet. Add the real client routing file from `contacts.example.csv`,
+then confirm `python -m tracking.cli status` reports draft readiness before
+running `python -m tracking.cli draft-reports` or `run --drafts`.
 
 ## Power Automate Search Evidence
 
@@ -75,6 +84,10 @@ Scheduler or Power Automate as an optional wrapper.
 
 PR #1, `Automate engagement completion`, has been merged into `main`:
 <https://github.com/weaverjsdw-ux/TrackingRepo/pull/1>
+
+Follow-up hardening is consolidated on branch
+`automation-followups-consolidated`:
+<https://github.com/weaverjsdw-ux/TrackingRepo/pull/new/automation-followups-consolidated>
 
 Review evidence:
 
