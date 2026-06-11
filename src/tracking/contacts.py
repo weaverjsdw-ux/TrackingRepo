@@ -10,6 +10,8 @@ from pathlib import Path
 from .naming import SendIdentity
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_REQUIRED_FIELDS = {"client", "pc_email", "report_delivery_enabled"}
+_DEFERRED_ROUTING_WORDS = ("lead", "score", "hipaa", "secure", "phi")
 
 
 class ContactError(ValueError):
@@ -43,10 +45,22 @@ def load_contacts(path: str | Path) -> list[Contact]:
 
     with p.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
-        required = {"client", "pc_email", "report_delivery_enabled"}
-        missing = required - {h.strip() for h in (reader.fieldnames or [])}
+        fields = {h.strip() for h in (reader.fieldnames or [])}
+        missing = _REQUIRED_FIELDS - fields
         if missing:
             raise ContactError(f"Contact file {p} missing columns: {sorted(missing)}")
+        extra = fields - _REQUIRED_FIELDS
+        if extra:
+            if any(
+                word in field.lower()
+                for field in extra
+                for word in _DEFERRED_ROUTING_WORDS
+            ):
+                raise ContactError(
+                    "Lead scoring routing is out of scope for engagement contacts; "
+                    f"remove unsupported columns: {sorted(extra)}"
+                )
+            raise ContactError(f"Contact file {p} has unsupported columns: {sorted(extra)}")
 
         contacts: list[Contact] = []
         for row_num, row in enumerate(reader, start=2):

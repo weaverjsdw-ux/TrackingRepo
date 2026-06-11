@@ -62,7 +62,9 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 ## 8. Contact CSV for report drafts
 1. Copy `contacts.example.csv` to `contacts.csv`.
 2. Fill one row per client with `client`, `pc_email`, and `report_delivery_enabled`.
-3. Keep the real `contacts.csv` local; it is git-ignored.
+3. Do not add lead-score, HIPAA, or secure-routing columns here; those are a
+   later workflow and are rejected by the engagement draft validator.
+4. Keep the real `contacts.csv` local; it is git-ignored.
 
 ## 9. Unattended runner
 1. From the repo root, run `.\scripts\install_scheduled_task.ps1`.
