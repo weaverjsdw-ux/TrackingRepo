@@ -42,6 +42,26 @@ def test_record_staged_suppresses_repeated_unchanged_pending(tmp_path):
     assert saved["pending"]["555111"]["seen_count"] == 2
 
 
+def test_save_state_writes_via_temp_file_before_replace(tmp_path, monkeypatch):
+    state_file = tmp_path / "automation_state.json"
+    original_write_text = Path.write_text
+    written_paths = []
+
+    def guarded_write_text(self, *args, **kwargs):
+        if self == state_file:
+            raise AssertionError("state file was written directly")
+        written_paths.append(self)
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", guarded_write_text)
+
+    run_state.save_state(state_file, {"last_run": "2026-06-11T13:00:00"})
+
+    assert run_state.load_state(state_file)["last_run"] == "2026-06-11T13:00:00"
+    assert any(path.parent == tmp_path and path.name.startswith(".automation_state.json.")
+               for path in written_paths)
+
+
 def test_record_staged_reports_changed_pending_reason(tmp_path):
     state_file = tmp_path / "automation_state.json"
 

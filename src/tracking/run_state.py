@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .intake import StagedSend
+from .state_io import write_json_atomic
 
 STATE_FILE = ".automation_state.json"
 
@@ -39,9 +40,7 @@ def load_state(path: str | Path) -> dict[str, Any]:
 
 
 def save_state(path: str | Path, state: dict[str, Any]) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    write_json_atomic(path, state)
 
 
 @dataclass

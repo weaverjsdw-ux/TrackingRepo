@@ -29,6 +29,7 @@ from typing import Callable, Protocol, runtime_checkable
 from . import naming
 from .naming import SendIdentity
 from .pipeline import SendResult, assess_completeness, process_folder
+from .state_io import write_json_atomic
 
 STATE_FILE = ".intake_state.json"
 
@@ -140,7 +141,7 @@ def _load_state(drop_root: Path) -> dict:
 
 
 def _save_state(drop_root: Path, state: dict) -> None:
-    (drop_root / STATE_FILE).write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    write_json_atomic(drop_root / STATE_FILE, state)
 
 
 def _save_dedup(drop_folder: Path, att: Attachment, seen: dict[str, str]) -> bool:
