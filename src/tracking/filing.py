@@ -39,14 +39,11 @@ def _subtype_bounces(result: SendResult, pdf_summary: dict) -> dict[Path, str]:
     return mapping
 
 
-def write_renamed(result: SendResult, pdf_summary: dict, out_dir: str | Path) -> list[str]:
-    """Copy every deliverable to <out_dir>/<finished name>. Returns the names
-    written. Files with no finished name (e.g. ignored lead scoring) are skipped."""
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def planned_renamed(result: SendResult, pdf_summary: dict) -> list[tuple[Path, str]]:
+    """Return every deliverable as (source path, finished name), without copying."""
     bounce_map = _subtype_bounces(result, pdf_summary)
 
-    written: list[str] = []
+    planned: list[tuple[Path, str]] = []
     for p in result.planned:
         if p.type is FileType.BOUNCE:
             name = naming.finished_csv_name(result.identity, bounce_map[p.source])
@@ -54,6 +51,18 @@ def write_renamed(result: SendResult, pdf_summary: dict, out_dir: str | Path) ->
             name = p.finished_name
         if not name:
             continue
-        shutil.copy2(p.source, out_dir / name)
+        planned.append((p.source, name))
+    return sorted(planned, key=lambda item: item[1])
+
+
+def write_renamed(result: SendResult, pdf_summary: dict, out_dir: str | Path) -> list[str]:
+    """Copy every deliverable to <out_dir>/<finished name>. Returns the names
+    written. Files with no finished name (e.g. ignored lead scoring) are skipped."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[str] = []
+    for source, name in planned_renamed(result, pdf_summary):
+        shutil.copy2(source, out_dir / name)
         written.append(name)
     return sorted(written)

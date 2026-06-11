@@ -139,6 +139,33 @@ def test_draft_reports_creates_engagement_draft_once(
                for p in writer.created[0].attachments)
 
 
+def test_draft_reports_dry_run_plans_without_gmail(
+    tmp_path, monkeypatch, capsys, synthetic_send
+):
+    processed = tmp_path / "drop" / "processed" / synthetic_send.name
+    shutil.copytree(synthetic_send, processed)
+    contacts = tmp_path / "contacts.csv"
+    contacts.write_text(
+        "client,pc_email,report_delivery_enabled\n"
+        "Northshore College,pc@example.com,yes\n",
+        encoding="utf-8",
+    )
+    reports_dir = tmp_path / "reports"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DROP_ROOT", str(tmp_path / "drop"))
+    monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("CONTACTS_CSV", str(contacts))
+    monkeypatch.setattr(cli, "_draft_writer", lambda: pytest.fail("Gmail should not be touched"))
+
+    rc = cli.main(["draft-reports", "--dry-run"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "DRY-RUN draft to pc@example.com" in out
+    assert "Engagement Tracking Report.pdf" in out
+    assert not reports_dir.exists()
+
+
 def test_draft_reports_missing_contact_file_blocks_cleanly(
     tmp_path, monkeypatch, capsys, synthetic_send
 ):

@@ -159,7 +159,7 @@ def cmd_write(args) -> int:
     return rc
 
 
-def cmd_draft_reports(_args) -> int:
+def cmd_draft_reports(args) -> int:
     from . import contacts, drafts, filing, overview, pipeline
     from .identify import FileType
 
@@ -175,7 +175,8 @@ def cmd_draft_reports(_args) -> int:
         print(f"DRAFT ERROR: {exc}")
         return 1
     reports_dir = Path(os.environ.get("REPORTS_DIR", str(Path.cwd().parent)))
-    writer = _draft_writer()
+    dry_run = getattr(args, "dry_run", False)
+    writer = None if dry_run else _draft_writer()
 
     rc = 0
     for folder in sorted(p for p in processed.iterdir() if p.is_dir()):
@@ -186,9 +187,26 @@ def cmd_draft_reports(_args) -> int:
                 raise drafts.DraftError("no overview PDF; cannot draft official report package")
             summary = overview.parse_summary(pdf)
             out = reports_dir / result.identity.folder_name
+            contact = contacts.report_contact_for(contact_rows, result.identity)
+            if dry_run:
+                attachment_names = [
+                    name for _source, name in filing.planned_renamed(result, summary)
+                ]
+                official_pdf = next(
+                    (name for name in attachment_names if name.endswith(".pdf")),
+                    None,
+                )
+                if official_pdf is None:
+                    raise drafts.DraftError("official overview PDF is not in the report package")
+                print(
+                    f"{result.identity.folder_name}: DRY-RUN draft to "
+                    f"{contact.pc_email} with {len(attachment_names)} "
+                    f"attachments: {', '.join(attachment_names)}"
+                )
+                continue
             if not out.exists():
                 filing.write_renamed(result, summary, out)
-            contact = contacts.report_contact_for(contact_rows, result.identity)
+            assert writer is not None
             outcome = drafts.create_engagement_draft(
                 writer, _state_path(), result.identity, out, contact
             )
@@ -289,7 +307,10 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--force", action="store_true",
                    help="overwrite existing cells (reconcile), not just blanks")
     w.set_defaults(func=cmd_write)
-    sub.add_parser("draft-reports", help="create Gmail drafts for processed engagement reports").set_defaults(func=cmd_draft_reports)
+    d = sub.add_parser("draft-reports", help="create Gmail drafts for processed engagement reports")
+    d.add_argument("--dry-run", action="store_true",
+                   help="validate recipients and attachments without creating Gmail drafts")
+    d.set_defaults(func=cmd_draft_reports)
     r = sub.add_parser("run", help="one cycle for scheduling: pull + write to the Sheet")
     r.add_argument("--drafts", action="store_true",
                    help="also create Gmail drafts after write-back succeeds")

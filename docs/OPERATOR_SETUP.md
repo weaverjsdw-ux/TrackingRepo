@@ -83,7 +83,8 @@ the stable landmarks — look for the nearest equivalent if wording differs.
 - ✅ Confirm the report-email **subject** is the `Client - Season Year Type` form (or send one sample subject).
 - ✅ `contacts.csv` filled for any client that should receive draft report emails.
 
-Then run `python -m tracking.cli authorize`, `pull`, `write --commit`, and
-`draft-reports`. Install the scheduled task only after those commands work
-manually. Use `run --drafts` or `install_scheduled_task.ps1 -Drafts` only after
-`python -m tracking.cli status` reports draft readiness.
+Then run `python -m tracking.cli authorize`, `pull`, `write --commit`,
+`draft-reports --dry-run`, and `draft-reports`. Install the scheduled task only
+after those commands work manually. Use `run --drafts` or
+`install_scheduled_task.ps1 -Drafts` only after `python -m tracking.cli status`
+reports draft readiness.

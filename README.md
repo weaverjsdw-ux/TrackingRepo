@@ -24,6 +24,7 @@ Operator commands:
 ```powershell
 python -m tracking.cli pull
 python -m tracking.cli write --commit
+python -m tracking.cli draft-reports --dry-run
 python -m tracking.cli draft-reports
 python -m tracking.cli status
 python -m tracking.cli run                     # scheduled pull + Sheet write
@@ -36,6 +37,8 @@ python -m tracking.cli sfmc-stage --send-id 12345 --client "Northshore College" 
 `contacts.example.csv`) and records Gmail draft IDs in the local automation
 state so reruns do not create duplicate drafts. The Gmail OAuth token must have
 compose permission; rerun `authorize` if an older token only has intake access.
+Run `draft-reports --dry-run` first to validate recipients and finished
+attachment names without creating Gmail drafts.
 `status` reports draft readiness, including missing or invalid contact routing,
 without creating drafts.
 
