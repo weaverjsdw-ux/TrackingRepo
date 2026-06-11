@@ -15,6 +15,7 @@ edge that wires Gmail intake -> Phase 1 pipeline -> Phase 3 sheet write.
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import sys
 from pathlib import Path
@@ -307,6 +308,54 @@ def cmd_status(_args) -> int:
     return 0
 
 
+def cmd_contacts_init(args) -> int:
+    from . import naming
+
+    processed_root = _drop_root() / "processed"
+    contacts_path = Path(args.output or os.environ.get("CONTACTS_CSV", "contacts.csv"))
+    if contacts_path.exists():
+        print(f"CONTACTS INIT ERROR: refusing to overwrite existing contact file: {contacts_path}")
+        return 1
+    if not processed_root.is_dir():
+        print(f"No processed sends at {processed_root}.")
+        return 0
+
+    clients: dict[str, str] = {}
+    for folder in sorted(p for p in processed_root.iterdir() if p.is_dir()):
+        try:
+            identity = naming.parse_send_identity(folder.name)
+        except Exception as exc:  # noqa: BLE001 - operator-facing setup helper
+            print(f"CONTACTS INIT ERROR: cannot read processed folder {folder.name!r}: {exc}")
+            return 1
+        key = " ".join(identity.client.casefold().split())
+        clients.setdefault(key, identity.client)
+
+    if not clients:
+        print(f"No processed sends at {processed_root}.")
+        return 0
+
+    contacts_path.parent.mkdir(parents=True, exist_ok=True)
+    with contacts_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["client", "pc_email", "report_delivery_enabled"],
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for client in sorted(clients.values(), key=str.casefold):
+            writer.writerow({
+                "client": client,
+                "pc_email": "",
+                "report_delivery_enabled": "no",
+            })
+
+    count = len(clients)
+    label = "row" if count == 1 else "rows"
+    print(f"Wrote {count} starter contact {label} -> {contacts_path}")
+    print("Fill pc_email and set report_delivery_enabled=yes only after recipient review.")
+    return 0
+
+
 def cmd_sfmc_probe(args) -> int:
     from . import sfmc
 
@@ -368,6 +417,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="also create Gmail drafts after write-back succeeds")
     r.set_defaults(func=cmd_run)
     sub.add_parser("status", help="show last run, pending sends, processed sends, and drafts").set_defaults(func=cmd_status)
+    ci = sub.add_parser(
+        "contacts-init",
+        help="create a local starter contacts.csv from processed sends",
+    )
+    ci.add_argument("--output", help="contact CSV path (default: CONTACTS_CSV or contacts.csv)")
+    ci.set_defaults(func=cmd_contacts_init)
     sf = sub.add_parser("sfmc-probe", help="probe SFMC API capabilities for one send")
     sf.add_argument("--send-id", required=True, help="SFMC/ExactTarget send or job identifier to probe")
     sf.set_defaults(func=cmd_sfmc_probe)

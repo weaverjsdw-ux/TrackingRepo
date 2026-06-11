@@ -18,6 +18,10 @@ Last reviewed: 2026-06-11
   validates recipients and finished attachment names without touching Gmail;
   `draft-reports --dry-run --prepare-files` also writes/repairs the local
   report folders while still avoiding Gmail.
+- `python -m tracking.cli contacts-init` creates a local starter `contacts.csv`
+  from processed client folders when the real file is missing. Starter rows are
+  disabled and have blank PC emails, and the command refuses to overwrite an
+  existing contact file.
 - Run state tracks last run, pending JobIDs, processed sends, and draft IDs.
   `python -m tracking.cli status` shows pending reasons, message counts,
   folder keys, processed folders, draft IDs, and draft-readiness blockers such
@@ -44,8 +48,10 @@ Last reviewed: 2026-06-11
   ignored by the engagement pipeline.
 - Official overview PDFs remain required. Sends without an overview PDF stay
   pending instead of being guessed from partial data.
-- Draft creation is blocked until a real, git-ignored `contacts.csv` exists.
-  `contacts.example.csv` is committed as the operator template.
+- Draft creation is blocked until the git-ignored `contacts.csv` has reviewed
+  PC emails and enabled delivery rows. `contacts.example.csv` is committed as
+  the operator template, and `contacts-init` can generate a local starter from
+  processed sends.
 - Power Automate Desktop is not part of core business logic. It should only wrap
   the Python CLI for notifications or operator convenience.
 - CodeRabbit did not leave actionable PR feedback on the merged automation PR.
@@ -58,16 +64,18 @@ Last reviewed: 2026-06-11
   this JobID`.
 - 5 processed send folders present.
 - 0 drafted reports.
-- Draft readiness blocked because `contacts.csv` is missing.
+- Draft readiness blocked because the generated `contacts.csv` starter rows are
+  still disabled pending recipient review.
 
 The pending JobIDs have export-message breadcrumbs in status output, but no
 local staged files remain in `drop/inbox`; the blocker is the missing overview
 PDF email/artifact, not a local file move.
 
-`contacts.csv` is not present in the checkout, so Gmail draft creation cannot be
-accepted live yet. Add the real client routing file from `contacts.example.csv`,
-then confirm `python -m tracking.cli status` reports draft readiness before
-running `python -m tracking.cli draft-reports` or `run --drafts`.
+`contacts.csv` now exists locally as a git-ignored starter generated from the
+processed sends. Gmail draft creation cannot be accepted live yet because each
+row is disabled and has no reviewed PC email. Fill those starter rows, then
+confirm `python -m tracking.cli status` reports draft readiness before running
+`python -m tracking.cli draft-reports` or `run --drafts`.
 
 ## Power Automate Search Evidence
 

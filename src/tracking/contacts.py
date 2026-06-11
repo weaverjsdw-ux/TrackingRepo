@@ -69,12 +69,13 @@ def load_contacts(path: str | Path) -> list[Contact]:
             email = (normalized.get("pc_email") or "").strip()
             if not client:
                 raise ContactError(f"Row {row_num}: client is required.")
-            if not _EMAIL_RE.match(email):
+            enabled = _bool(normalized.get("report_delivery_enabled", ""))
+            if (enabled or email) and not _EMAIL_RE.match(email):
                 raise ContactError(f"Row {row_num}: Invalid PC email {email!r}.")
             contacts.append(Contact(
                 client=client,
                 pc_email=email,
-                report_delivery_enabled=_bool(normalized.get("report_delivery_enabled", "")),
+                report_delivery_enabled=enabled,
             ))
     return contacts
 

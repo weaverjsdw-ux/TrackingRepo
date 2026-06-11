@@ -81,6 +81,14 @@ def test_disabled_report_delivery_blocks_draft(tmp_path):
         report_contact_for(load_contacts(path), SendIdentity("Northshore College", "Fall", "2026", "eNL"))
 
 
+def test_disabled_contact_can_leave_pc_email_blank(tmp_path):
+    path = tmp_path / "contacts.csv"
+    _write_contacts(path, ["Northshore College,,no"])
+
+    with pytest.raises(ContactError, match="disabled"):
+        report_contact_for(load_contacts(path), SendIdentity("Northshore College", "Fall", "2026", "eNL"))
+
+
 def test_invalid_email_blocks_report_delivery(tmp_path):
     path = tmp_path / "contacts.csv"
     _write_contacts(path, ["Northshore College,not-an-email,yes"])

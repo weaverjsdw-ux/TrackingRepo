@@ -28,6 +28,7 @@ python -m tracking.cli draft-reports --dry-run
 python -m tracking.cli draft-reports --dry-run --prepare-files
 python -m tracking.cli draft-reports
 python -m tracking.cli status
+python -m tracking.cli contacts-init           # create local starter contacts.csv from processed sends
 python -m tracking.cli run                     # scheduled pull + Sheet write
 python -m tracking.cli run --drafts            # opt-in draft creation too
 python -m tracking.cli sfmc-probe --send-id 12345
@@ -35,10 +36,13 @@ python -m tracking.cli sfmc-stage --send-id 12345 --client "Northshore College" 
 ```
 
 `draft-reports` uses `CONTACTS_CSV` (default `contacts.csv`; start from
-`contacts.example.csv`) and records Gmail draft IDs in the local automation
-state so reruns do not create duplicate drafts. The Gmail OAuth token must have
-compose permission; rerun `authorize` if an older token only has intake access.
-The contact CSV is engagement-only: extra lead-score/HIPAA routing fields are
+`contacts.example.csv`, or run `contacts-init` after at least one send is in
+`drop/processed`) and records Gmail draft IDs in the local automation state so
+reruns do not create duplicate drafts. `contacts-init` never overwrites an
+existing file; it creates disabled starter rows with blank PC emails for the
+operator to fill and review. The Gmail OAuth token must have compose
+permission; rerun `authorize` if an older token only has intake access. The
+contact CSV is engagement-only: extra lead-score/HIPAA routing fields are
 rejected until that later workflow is designed.
 Run `draft-reports --dry-run` first to validate recipients and finished
 attachment names without creating Gmail drafts. Add `--prepare-files` to that
