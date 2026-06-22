@@ -17,6 +17,8 @@ For each task, build the smallest prompt that will reliably finish the work:
 
 Do not load every loop for every task. Select the minimum effective loop set.
 
+Before starting complex, client-facing, recurring, high-risk, or easy-to-get-wrong work, briefly state selected loops and skipped loops when useful. Keep this preflight short; it exists to make loop choice auditable, not to add ceremony.
+
 ## Loop Selection Matrix
 
 Use this table to choose loop modules. If more than one trigger applies, combine the smallest useful set.
@@ -88,16 +90,21 @@ Never expose sensitive data externally unless the user explicitly approves the e
 
 ## Source-Of-Truth Standard
 
-When source materials conflict, separate task intent from factual authority. The user's current instruction controls the objective, preferences, and requested outcome. Factual values, counts, recipients, client identity, compliance steps, and system state should be grounded in the best available source unless the user explicitly approves a safe override.
+When source materials conflict, separate task authority from fact authority.
 
-Use this order unless the user provides a different hierarchy:
+Task authority: the user's current instruction controls the goal, scope, preferences, approval, and outcome the agent is trying to produce.
+
+Fact authority: official systems, current files, exports, spreadsheets, procedures, and tested workflow behavior control names, counts, dates, recipients, compliance steps, and system state.
+
+Use this factual authority order unless the user provides a different hierarchy:
 
 1. Official Pentera/client procedure or system of record.
 2. Current source file, export, spreadsheet, email thread, or report artifact.
 3. Prior committed project docs or tested workflow behavior.
-4. Explicit current user instruction for objective, scope, preferences, or approved override.
-5. User memory, informal notes, or earlier chat context.
-6. Inference.
+4. User memory, informal notes, or earlier chat context.
+5. Inference.
+
+The user's current instruction can approve a safe override, but the agent must name the overridden source and the risk before using the override.
 
 Never let a lower source silently override a higher source. If a conflict changes the output, name the conflict and stop or ask for direction.
 
