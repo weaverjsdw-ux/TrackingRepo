@@ -14,6 +14,8 @@ from __future__ import annotations
 import datetime
 import json
 import sys
+import urllib.error
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -109,3 +111,115 @@ def parse_soap(raw):
         if local_name(el.tag) == "Results":
             rows.append({local_name(c.tag): c.text for c in el})
     return status, req_id, rows
+
+
+class _UrllibTransport:
+    def post(self, url, data, headers):
+        try:
+            with urllib.request.urlopen(
+                urllib.request.Request(url, data=data, headers=headers, method="POST"), timeout=300
+            ) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def get(self, url, headers):
+        try:
+            with urllib.request.urlopen(
+                urllib.request.Request(url, headers=headers, method="GET"), timeout=300
+            ) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+
+class SfmcError(RuntimeError):
+    pass
+
+
+class SfmcClient:
+    def __init__(self, *, auth_base, soap_base, rest_base, client_id, client_secret, transport=None):
+        self.auth_base = auth_base.rstrip("/")
+        self.soap_base = (soap_base or "").rstrip("/")
+        self.rest_base = (rest_base or "").rstrip("/")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.transport = transport or _UrllibTransport()
+        self.token = None
+        self.soap_url = None
+        self.rest_url = None
+
+    def authenticate(self):
+        body = json.dumps({
+            "grant_type": "client_credentials",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }).encode()
+        st, raw = self.transport.post(
+            f"{self.auth_base}/v2/token", body, {"Content-Type": "application/json"}
+        )
+        if st != 200:
+            raise SfmcError(f"SFMC auth failed (HTTP {st}): {raw[:200]!r}")
+        tok = json.loads(raw)
+        self.token = tok["access_token"]
+        self.soap_url = (tok.get("soap_instance_url") or self.soap_base).rstrip("/")
+        self.rest_url = (tok.get("rest_instance_url") or self.rest_base).rstrip("/")
+
+    def _soap_call(self, obj, props, filt="", cont=None):
+        env = build_retrieve_envelope(obj, props, filt=filt, cont=cont, token=self.token)
+        st, raw = self.transport.post(
+            f"{self.soap_url}/Service.asmx", env.encode(),
+            {"Content-Type": "text/xml; charset=utf-8", "SOAPAction": "Retrieve"},
+        )
+        if st != 200:
+            raise SfmcError(f"SOAP {obj} failed (HTTP {st}): {raw[:200]!r}")
+        return parse_soap(raw)
+
+    def retrieve(self, obj, props, filt=""):
+        status, req_id, rows = self._soap_call(obj, props, filt=filt)
+        guard = 0
+        while status == "MoreDataAvailable" and req_id and guard < 2000:
+            guard += 1
+            status, req_id, more = self._soap_call(obj, props, cont=req_id)
+            rows += more
+        return rows
+
+    def get_send(self, send_id):
+        filt = (
+            '<Filter xsi:type="SimpleFilterPart"><Property>ID</Property>'
+            f"<SimpleOperator>equals</SimpleOperator><Value>{send_id}</Value></Filter>"
+        )
+        rows = self.retrieve("Send", [
+            "ID", "EmailName", "Subject", "SentDate", "NumberSent", "NumberDelivered",
+            "HardBounces", "SoftBounces", "OtherBounces", "UniqueOpens", "UniqueClicks", "Unsubscribes",
+        ], filt)
+        if not rows:
+            raise SfmcError(f"No Send found for ID {send_id}.")
+        return rows[0]
+
+    def get_events(self, obj, send_id, props):
+        filt = (
+            '<Filter xsi:type="SimpleFilterPart"><Property>SendID</Property>'
+            f"<SimpleOperator>equals</SimpleOperator><Value>{send_id}</Value></Filter>"
+        )
+        return self.retrieve(obj, props, filt)
+
+    def get_de_rows_rest(self, customer_key, page_size=2500):
+        out = []
+        page = 1
+        while True:
+            url = (f"{self.rest_url}/data/v1/customobjectdata/key/{customer_key}/rowset"
+                   f"?$page={page}&$pageSize={page_size}")
+            st, raw = self.transport.get(url, {"Authorization": f"Bearer {self.token}"})
+            if st != 200:
+                raise SfmcError(f"DE rowset failed (HTTP {st}) for {customer_key}: {raw[:200]!r}")
+            payload = json.loads(raw)
+            for item in payload.get("items", []):
+                row = dict(item.get("keys", {}))
+                row.update(item.get("values", {}))
+                out.append(row)
+            count = payload.get("count", len(out))
+            if page * page_size >= count or not payload.get("items"):
+                break
+            page += 1
+        return out
