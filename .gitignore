@@ -32,6 +32,14 @@ token*.json
 service-account*.json
 client_secret*.json
 
+# eQC metric CSVs (belt-and-suspenders, like the eNL/ePC lines above).
+* eQC - *.csv
+
+# Per-run manifests hold PII (client names, SendIDs, counts, draft IDs) —
+# never commit real runs; keep only the redacted example.
+runs/*
+!runs/example/
+
 # Python
 __pycache__/
 *.py[cod]

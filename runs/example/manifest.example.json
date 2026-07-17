@@ -1,0 +1,19 @@
+{
+  "run_id": "2026-07",
+  "created": "2026-07-15",
+  "sheet": { "id": "<SHEET_ID>", "tab": "<SHEET_TAB>" },
+  "calendar": { "id": "<CALENDAR_ID>", "mark_initials": "JS" },
+  "sends": [
+    {
+      "client": "Example College",
+      "season": "Spring",
+      "year": "2026",
+      "type": "eNL",
+      "send_id": "000000",
+      "booklet_selector": "v=enlA",
+      "lead_scoring_de": "sd_Example College - Lead Scoring",
+      "hipaa": false,
+      "confirm_zero": false
+    }
+  ]
+}
