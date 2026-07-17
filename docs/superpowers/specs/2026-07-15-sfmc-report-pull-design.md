@@ -1,7 +1,7 @@
 # Design — Manifest-driven SFMC report pull (`pull_reports`)
 
 **Date:** 2026-07-15
-**Status:** Amended per operator review (2026-07-15); awaiting final approval before the implementation plan.
+**Status:** Approved (2026-07-15); transitioning to the implementation plan.
 **Author/operator:** John Weaver (Pentera). Solo-operated automation.
 
 ---
@@ -317,6 +317,8 @@ scope for this build**, not follow-ups:
   `!runs/example/manifest.example.json` exception; and add the **missing `* eQC - *.csv`**
   pattern — only `eNL`/`ePC` metric CSVs are ignored today, so eQC files (Monmouth, Mount
   Vernon, Alaska, …) would leak. Lead Scoring files are already covered by `sd_*.csv`.
+  **Sequencing constraint:** this hardening must land **before** any command that can create
+  `runs/` or write report/lead CSVs — it is the first implementation step, not a later one.
 - **`pyproject.toml`:** add `reportlab>=4.0` (a new `reports` extra, or a core dep). The
   Calendar API reuses `google-api-python-client` + `google-auth`, already in the `sheets`
   extra.
