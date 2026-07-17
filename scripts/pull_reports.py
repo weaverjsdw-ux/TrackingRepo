@@ -20,10 +20,22 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from reportlab.graphics.charts.barcharts import HorizontalBarChart
+from reportlab.graphics.shapes import Drawing
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
 # Make the installed `tracking` package importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tracking import naming
+
+_NAVY = colors.HexColor("#1f3a5f"); _NAVY2 = colors.HexColor("#26425f"); _GREEN = colors.HexColor("#2f7d68")
+_ORANGE = colors.HexColor("#c2792f"); _GRAY = colors.HexColor("#64707d"); _LINE = colors.HexColor("#d9dee5")
+_ALT = colors.HexColor("#f3f5f7"); _TXT = colors.HexColor("#33404d"); _MUTE = colors.HexColor("#8892a0")
 
 # ── booklet selector defaults by send type (a RULE; the value is confirmed
 # per send in the manifest). eNL newsletters tag the booklet link v=enlA;
@@ -357,3 +369,113 @@ def write_engagement_csvs(folder, identity, metric_rows):
             w.writerows(build_row(r) for r in rows)
         written.append(name)
     return written
+
+
+def _sty(**k):
+    k.setdefault("leading", k.get("fontSize", 10) * 1.25)
+    return ParagraphStyle("x", **k)
+
+
+def _san(t):
+    t = t or ""
+    for a, b in [("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'),
+                 ("–", "-"), ("—", "-"), ("…", "..."), (" ", " ")]:
+        t = t.replace(a, b)
+    return t.strip()
+
+
+def _kpi(num, label):
+    p = ParagraphStyle("k", textColor=colors.white, alignment=1, leading=20)
+    return Paragraph(f'<font size="17"><b>{num}</b></font><br/><font size="7.5">{label}</font>', p)
+
+
+def _perf_table(rows, indent_labels=()):
+    t = Table([[r[0], r[1]] for r in rows], colWidths=[1.9 * inch, 1.05 * inch])
+    ts = [('FONTSIZE', (0, 0), (-1, -1), 9.5), ('TEXTCOLOR', (0, 0), (0, -1), _GRAY),
+          ('TEXTCOLOR', (1, 0), (1, -1), _TXT), ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+          ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('LINEBELOW', (0, 0), (-1, -2), 0.5, _LINE),
+          ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]
+    for i in indent_labels:
+        ts.append(('LEFTPADDING', (0, i), (0, i), 16))
+    t.setStyle(TableStyle(ts))
+    return t
+
+
+def render_report_pdf(path, identity, send, total_opens, total_clicks, bh):
+    def n(x):
+        try:
+            return int(x or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    sent = n(send.get("NumberSent")); deliv = n(send.get("NumberDelivered"))
+    uo = n(send.get("UniqueOpens")); uc = n(send.get("UniqueClicks")); topen = n(total_opens)
+    hard = n(send.get("HardBounces")); soft = n(send.get("SoftBounces")); block = n(send.get("OtherBounces"))
+    unsub = n(send.get("Unsubscribes")); tb = hard + soft + block
+    dr = deliv / sent * 100 if sent else 0
+    orr = uo / deliv * 100 if deliv else 0
+    ctr = uc / deliv * 100 if deliv else 0
+    doc = SimpleDocTemplate(str(path), pagesize=letter, leftMargin=0.7 * inch, rightMargin=0.7 * inch,
+                            topMargin=0.5 * inch, bottomMargin=0.45 * inch)
+    E = []
+    E.append(Paragraph("Engagement Tracking Report",
+                       _sty(fontName="Helvetica-Bold", fontSize=22, textColor=_NAVY, spaceAfter=2)))
+    E.append(Paragraph(_san(f"{identity.client}  -  {identity.season} {identity.year} {identity.type}"),
+                       _sty(fontName="Helvetica", fontSize=10.5, textColor=_MUTE, spaceAfter=12)))
+    meta = Table([["Job ID", send.get("ID")], ["Subject", _san(send.get("Subject"))],
+                  ["Date Sent", (send.get("SentDate") or "").replace("T", " ")],
+                  ["Total Sent", f"{sent:,}"], ["Total Not Sent", "0"]], colWidths=[1.4 * inch, 4.6 * inch])
+    meta.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 9.5), ('TEXTCOLOR', (0, 0), (0, -1), _GRAY),
+        ('TEXTCOLOR', (1, 0), (1, -1), _TXT), ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.5, _LINE), ('TOPPADDING', (0, 0), (-1, -1), 3.5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5)]))
+    E.append(meta); E.append(Spacer(1, 9))
+    tiles = Table([[_kpi(f"{deliv:,}", f"Delivered - {dr:.3f}%"), _kpi(f"{uo:,}", f"Unique Opens - {orr:.3f}%"),
+                    _kpi(f"{uc:,}", f"Unique Clicks - {ctr:.3f}%"), _kpi(f"{unsub:,}", "Unsubscribes")]],
+                  colWidths=[1.62 * inch] * 4, rowHeights=[0.54 * inch])
+    tiles.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), _NAVY2), ('BACKGROUND', (1, 0), (1, 0), _GREEN),
+        ('BACKGROUND', (2, 0), (2, 0), _ORANGE), ('BACKGROUND', (3, 0), (3, 0), _GRAY),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6)]))
+    E.append(tiles); E.append(Spacer(1, 11))
+    hdr = _sty(fontName="Helvetica-Bold", fontSize=12, textColor=_NAVY, spaceAfter=5)
+    left = [Paragraph("Send Performance", hdr), _perf_table(
+        [("Delivery Rate", f"{dr:.3f}%"), ("Total Bounces", f"{tb:,}"), ("Hard Bounce", f"{hard:,}"),
+         ("Soft Bounce", f"{soft:,}"), ("Block Bounce", f"{block:,}"), ("Delivered", f"{deliv:,}")],
+        indent_labels=(2, 3, 4))]
+    right = [Paragraph("Open Performance", hdr), _perf_table(
+        [("Open Rate", f"{orr:.3f}%"), ("Total Opens", f"{topen:,}"), ("Unique Opens", f"{uo:,}"),
+         ("Total Clicks", f"{total_clicks:,}"), ("Unique Clicks", f"{uc:,}"), ("Booklet clicks (BH)", f"{bh:,}")])]
+    two = Table([[left, right]], colWidths=[3.15 * inch, 3.15 * inch])
+    two.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (0, 0), 0),
+                             ('LEFTPADDING', (1, 0), (1, 0), 18)]))
+    E.append(two); E.append(Spacer(1, 11))
+    E.append(Paragraph("Inbox Activity", hdr))
+    ia = [["Metric", "Total", "Unique"], ["Opens", f"{topen:,}", f"{uo:,}"], ["Clicks", f"{total_clicks:,}", f"{uc:,}"],
+          ["Forwards", "0", "0"], ["Conversions", "0", "0"], ["Unsubscribes", "-", f"{unsub:,}"]]
+    iat = Table(ia, colWidths=[3.0 * inch, 1.65 * inch, 1.65 * inch])
+    iast = [('BACKGROUND', (0, 0), (-1, 0), _NAVY), ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'), ('TEXTCOLOR', (0, 1), (-1, -1), _TXT),
+            ('TOPPADDING', (0, 0), (-1, -1), 3.5), ('BOTTOMPADDING', (0, 0), (-1, -1), 3.5),
+            ('LINEBELOW', (0, 0), (-1, -1), 0.5, _LINE)]
+    for r in range(2, 6, 2):
+        iast.append(('BACKGROUND', (0, r), (-1, r), _ALT))
+    iat.setStyle(TableStyle(iast)); E.append(iat); E.append(Spacer(1, 9))
+    E.append(Paragraph(f"Unengaged Subscribers (of {deliv:,} delivered)", hdr))
+    E.append(_perf_table([("Did not open", f"{deliv - uo:,}"), ("Did not click", f"{deliv - uc:,}")]))
+    E.append(Spacer(1, 9))
+    d = Drawing(430, 84); bc = HorizontalBarChart()
+    bc.x = 70; bc.y = 4; bc.height = 72; bc.width = 300
+    bc.data = [[sent, deliv, uo, uc]]; bc.categoryAxis.categoryNames = ["Sent", "Delivered", "Opened", "Clicked"]
+    bc.categoryAxis.labels.fontSize = 8; bc.valueAxis.visible = False
+    bc.valueAxis.valueMin = 0; bc.valueAxis.valueMax = sent * 1.15 if sent else 1
+    bc.bars[0].fillColor = _NAVY; bc.bars.strokeColor = None; bc.barWidth = 12; bc.groupSpacing = 7
+    bc.barLabelFormat = '%d'; bc.barLabels.fontSize = 8; bc.barLabels.dx = 4
+    bc.barLabels.boxAnchor = 'w'; bc.barLabels.fillColor = _TXT
+    d.add(bc)
+    foot = Paragraph("Generated by engagement-tracker from Marketing Cloud API data (Send object + open/click "
+                     "tracking). Bounce sub-split may differ by a few from the UI; the total is exact. Not "
+                     "ExactTarget's document.", _sty(fontName="Helvetica-Oblique", fontSize=7.5, textColor=_MUTE))
+    E.append(KeepTogether([Paragraph("Delivery Funnel", hdr), d, Spacer(1, 8), foot]))
+    doc.build(E)

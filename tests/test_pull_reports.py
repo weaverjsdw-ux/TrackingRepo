@@ -2,6 +2,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pdfplumber
+
 # Load scripts/pull_reports.py as an importable module.
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "pull_reports.py"
 _spec = importlib.util.spec_from_file_location("pull_reports", _SCRIPT)
@@ -233,3 +235,19 @@ def test_write_engagement_csvs_data_driven(tmp_path):
     content = (tmp_path / "Example College Spring 2026 eNL - Total Sent.csv").read_text(encoding="utf-8-sig")
     assert content.splitlines()[0] == "Subscriber Key,Email Address"
     assert "u0@x,u0@x" in content
+
+
+def test_render_report_pdf_smoke(tmp_path):
+    send = {
+        "ID": "691866", "Subject": "Charitable Solutions", "SentDate": "2026-06-24T14:05:00",
+        "NumberSent": "1086", "NumberDelivered": "1051", "UniqueOpens": "415", "UniqueClicks": "9",
+        "HardBounces": "6", "SoftBounces": "23", "OtherBounces": "6", "Unsubscribes": "16",
+    }
+    out = tmp_path / "r.pdf"
+    pr.render_report_pdf(out, _identity(), send, total_opens=675, total_clicks=25, bh=2)
+    assert out.read_bytes().startswith(b"%PDF")
+    with pdfplumber.open(out) as pdf:
+        assert len(pdf.pages) == 1
+        text = pdf.pages[0].extract_text()
+    assert "Engagement Tracking Report" in text
+    assert "1,051" in text and "415" in text  # delivered + unique opens present
