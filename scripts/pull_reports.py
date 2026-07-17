@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from reportlab.graphics.charts.barcharts import HorizontalBarChart
 from reportlab.graphics.shapes import Drawing
@@ -293,7 +294,6 @@ def booklet_rows(clicks, selector):
 
 # CSV column layout per metric: (header, row-builder). SubscriberKey doubles as
 # Email Address in this account (spec §5.2). Booklet reuses the clicks layout.
-_CORE = ("Total Sent", "Unique Opens", "Unique Clicks")
 _OPTIONAL = ("Hard Bounces", "Soft Bounces", "Block Bounces", "Unsubscribes", "Request Your")
 
 _CSV_LAYOUT = {
@@ -383,7 +383,7 @@ def _sty(**k):
 def _san(t):
     t = t or ""
     for a, b in [("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'),
-                 ("–", "-"), ("—", "-"), ("…", "..."), (" ", " ")]:
+                 ("–", "-"), ("—", "-"), ("…", "..."), ("\xa0", " ")]:
         t = t.replace(a, b)
     return t.strip()
 
@@ -498,8 +498,16 @@ def build_api_sheet_plan(send, total_opens, bh):
         except (TypeError, ValueError):
             return 0
 
-    sent = n(send.get("NumberSent")); deliv = n(send.get("NumberDelivered"))
-    uo = n(send.get("UniqueOpens")); uc = n(send.get("UniqueClicks"))
+    def _req(field):
+        v = send.get(field)
+        if v is None:
+            raise sheet.SheetError(
+                f"Send.{field} missing from the API response; refusing to write a silent 0 to the sheet."
+            )
+        return n(v)
+
+    sent = _req("NumberSent"); deliv = _req("NumberDelivered")
+    uo = _req("UniqueOpens"); uc = _req("UniqueClicks")
     plan = sheet.SheetPlan()
     plan.values["# Total sent"] = sent
     plan.values["# Delivered"] = deliv
@@ -607,7 +615,7 @@ def resolve_lead_de(client, de_name_or_key, client_name):
 
     def _lookup(prop, value):
         filt = (f'<Filter xsi:type="SimpleFilterPart"><Property>{prop}</Property>'
-                f"<SimpleOperator>equals</SimpleOperator><Value>{value}</Value></Filter>")
+                f"<SimpleOperator>equals</SimpleOperator><Value>{escape(value)}</Value></Filter>")
         return client.retrieve("DataExtension", ["Name", "CustomerKey"], filt)
 
     rows = _lookup("CustomerKey", target) or _lookup("Name", target)
@@ -622,7 +630,7 @@ def resolve_lead_de(client, de_name_or_key, client_name):
 def de_ordered_columns(client, customer_key):
     """Return list of field names ordered by DataExtensionField.Ordinal."""
     filt = (f'<Filter xsi:type="SimpleFilterPart"><Property>DataExtension.CustomerKey</Property>'
-            f"<SimpleOperator>equals</SimpleOperator><Value>{customer_key}</Value></Filter>")
+            f"<SimpleOperator>equals</SimpleOperator><Value>{escape(customer_key)}</Value></Filter>")
     rows = client.retrieve("DataExtensionField", ["Name", "Ordinal"], filt)
     def _ord(r):
         o = r.get("Ordinal")
@@ -640,7 +648,6 @@ def write_lead_scoring_csv(folder, de_name, columns, rows, when):
     folder.mkdir(parents=True, exist_ok=True)
     name = lead_scoring_filename(de_name, when)
     # REST rowset lowercases field names; map back to the ordinal-cased column.
-    lower = {c.lower(): c for c in columns}
     with open(folder / name, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(columns)
@@ -773,6 +780,7 @@ def run_send(send, deps, *, force=False, dry_run=False, skip_drafts=False,
             rec = _RecordingWriter(deps["sheet_writer"])
             try:
                 written = sheet.write_send(rec, identity, plan, fill_blanks_only=not force)
+                out["flags"] += plan.warnings
                 out["sheet"] = {"status": "dry-run",
                                 "cells": {h: f"{col_to_a1(c)}{r + 1}" for h, (r, c) in written.items()}}
             except sheet.SheetError as exc:
@@ -867,7 +875,15 @@ def _load_dotenv(path=".env"):
             os.environ.setdefault(k.strip(), v.strip())
 
 
-def _real_deps():
+def _cfg(manifest, block, key, env_key, default=None):
+    """Manifest value wins (unless empty or a '<...>' placeholder); else env; else default."""
+    val = (manifest.get(block) or {}).get(key) if manifest else None
+    if val and not str(val).startswith("<"):
+        return val
+    return os.environ.get(env_key, default)
+
+
+def _real_deps(manifest=None):
     reports_dir = Path(os.environ.get("REPORTS_DIR", str(Path.cwd().parent)))
     lead_dir = Path(os.environ.get("LEAD_SCORING_DIR", str(reports_dir / "Lead Scoring")))
     sfmc = SfmcClient(
@@ -876,9 +892,10 @@ def _real_deps():
         client_secret=os.environ["SFMC_CLIENT_SECRET"],
     )
     sheet_writer = sheets_writer.GoogleSheetsWriter(
-        spreadsheet_id=os.environ.get("SHEET_ID"), tab=os.environ.get("SHEET_TAB", "Sheet1"),
+        spreadsheet_id=_cfg(manifest, "sheet", "id", "SHEET_ID"),
+        tab=_cfg(manifest, "sheet", "tab", "SHEET_TAB", "Sheet1"),
         service_account=os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT", "secrets/service-account.json"))
-    cal_id = os.environ.get("CALENDAR_ID")
+    cal_id = _cfg(manifest, "calendar", "id", "CALENDAR_ID")
 
     def calendar_writer_for_tab(tab):
         return sheets_writer.GoogleSheetsWriter(
@@ -892,7 +909,8 @@ def _real_deps():
     return {
         "sfmc": sfmc, "reports_dir": reports_dir, "lead_dir": lead_dir,
         "sheet_writer": sheet_writer, "calendar_writer_for_tab": calendar_writer_for_tab,
-        "draft_writer": draft_writer, "mark_initials": os.environ.get("CALENDAR_MARK_INITIALS", "JS"),
+        "draft_writer": draft_writer,
+        "mark_initials": _cfg(manifest, "calendar", "mark_initials", "CALENDAR_MARK_INITIALS", "JS"),
     }
 
 
@@ -910,7 +928,7 @@ def cmd_build(args):
     rid = args.run_id or default_run_id()
     path = manifest_path(rid)
     manifest = load_manifest(path)
-    deps = _real_deps()
+    deps = _real_deps(manifest)
     confirm_ids = set(args.confirm_zero or [])
     results = []
     for send in manifest["sends"]:

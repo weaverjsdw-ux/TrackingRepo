@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pdfplumber
+import pytest
 
 # Load scripts/pull_reports.py as an importable module.
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "pull_reports.py"
@@ -11,7 +12,7 @@ pr = importlib.util.module_from_spec(_spec)
 sys.modules["pull_reports"] = pr
 _spec.loader.exec_module(pr)
 
-from tracking import naming
+from tracking import naming, sheet
 
 
 def test_manifest_round_trip(tmp_path):
@@ -275,6 +276,13 @@ def test_build_api_sheet_plan_omits_zero_booklet():
     assert "Booklet landing page unique clicks" not in plan.values
 
 
+def test_build_api_sheet_plan_missing_field_fails_loud():
+    # SFMC SOAP omits null properties; NumberDelivered is absent (not "0").
+    send = {"NumberSent": "100", "UniqueOpens": "10", "UniqueClicks": "5", "Subject": "Hi"}
+    with pytest.raises(sheet.SheetError):
+        pr.build_api_sheet_plan(send, total_opens=12, bh=2)
+
+
 def test_candidate_tabs_covers_send_month_and_next():
     assert pr.candidate_tabs("2026-06-24T14:05:00") == ["June 2026", "July 2026"]
     assert pr.candidate_tabs("2026-12-30T00:00:00") == ["December 2026", "January 2027"]
@@ -514,3 +522,24 @@ def test_run_send_dry_run_computes_plan_but_writes_nothing(tmp_path):
     assert out["drafts"]["report"]["attachments"]         # pdf + csvs listed
     assert out["calendar"]["status"].startswith("dry-run")
     assert out["lead_scoring_file"].startswith("sd_Example College - Lead Scoring")
+
+
+def test_cfg_manifest_wins_over_env(monkeypatch):
+    monkeypatch.setenv("CALENDAR_MARK_INITIALS", "JS")
+    monkeypatch.setenv("CALENDAR_ID", "env-cal-id")
+
+    # Manifest value wins over env.
+    manifest = {"calendar": {"mark_initials": "AB"}}
+    assert pr._cfg(manifest, "calendar", "mark_initials", "CALENDAR_MARK_INITIALS", "JS") == "AB"
+
+    # A placeholder value ("<...>") falls back to env.
+    manifest_placeholder = {"calendar": {"id": "<CALENDAR_ID>"}}
+    assert pr._cfg(manifest_placeholder, "calendar", "id", "CALENDAR_ID") == "env-cal-id"
+
+    # A missing block falls back to env.
+    manifest_missing_block = {}
+    assert pr._cfg(manifest_missing_block, "calendar", "mark_initials", "CALENDAR_MARK_INITIALS", "JS") == "JS"
+
+    # Env default applies when neither manifest nor env has a value.
+    monkeypatch.delenv("CALENDAR_MARK_INITIALS", raising=False)
+    assert pr._cfg({}, "calendar", "mark_initials", "CALENDAR_MARK_INITIALS", "JS") == "JS"
