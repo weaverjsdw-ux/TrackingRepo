@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime
 import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # Make the installed `tracking` package importable when run as a bare script.
@@ -71,3 +72,40 @@ def scaffold_manifest(run_id: str) -> dict:
             }
         ],
     }
+
+
+def local_name(tag: str) -> str:
+    """Strip any XML namespace: '{ns}Results' -> 'Results'."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def build_retrieve_envelope(obj, props, filt="", cont=None, token="TOKEN"):
+    p = "".join(f"<Properties>{x}</Properties>" for x in props)
+    if cont:
+        inner = f"<ContinueRequest>{cont}</ContinueRequest><ObjectType>{obj}</ObjectType>{p}"
+    else:
+        inner = f"<ObjectType>{obj}</ObjectType>{p}{filt}"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+        f'<soapenv:Header><fueloauth xmlns="http://exacttarget.com">{token}</fueloauth></soapenv:Header>'
+        '<soapenv:Body><RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">'
+        f"<RetrieveRequest>{inner}</RetrieveRequest></RetrieveRequestMsg></soapenv:Body></soapenv:Envelope>"
+    )
+
+
+def parse_soap(raw):
+    """Return (OverallStatus, RequestID, [row dicts]) from a Retrieve response."""
+    root = ET.fromstring(raw)
+    status = req_id = None
+    rows = []
+    for el in root.iter():
+        if local_name(el.tag) == "OverallStatus" and status is None:
+            status = el.text
+        if local_name(el.tag) == "RequestID" and req_id is None:
+            req_id = el.text
+    for el in root.iter():
+        if local_name(el.tag) == "Results":
+            rows.append({local_name(c.tag): c.text for c in el})
+    return status, req_id, rows

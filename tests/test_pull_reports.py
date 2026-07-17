@@ -33,3 +33,41 @@ def test_scaffold_manifest_prefills_booklet_by_type():
     assert m["run_id"] == "2026-08"
     assert m["sends"] and m["sends"][0]["booklet_selector"] == "v=enlA"
     assert m["sends"][0]["hipaa"] is False
+
+
+_SOAP_OK = b"""<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+ <soap:Body>
+  <RetrieveResponseMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
+   <OverallStatus>OK</OverallStatus>
+   <RequestID>req-1</RequestID>
+   <Results xsi:type="Send" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+     <ID>691994</ID><NumberSent>1000</NumberSent>
+   </Results>
+  </RetrieveResponseMsg>
+ </soap:Body>
+</soap:Envelope>"""
+
+
+def test_parse_soap_reads_status_and_rows():
+    status, req_id, rows = pr.parse_soap(_SOAP_OK)
+    assert status == "OK"
+    assert req_id == "req-1"
+    assert rows == [{"ID": "691994", "NumberSent": "1000"}]
+
+
+def test_build_retrieve_envelope_has_soap11_and_token_and_filter():
+    env = pr.build_retrieve_envelope(
+        "OpenEvent", ["SubscriberKey", "EventDate"],
+        filt="<Filter>x</Filter>", token="ABC",
+    )
+    assert 'xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"' in env
+    assert '<fueloauth xmlns="http://exacttarget.com">ABC</fueloauth>' in env
+    assert "<ObjectType>OpenEvent</ObjectType>" in env
+    assert "<Properties>SubscriberKey</Properties>" in env
+    assert "<Filter>x</Filter>" in env
+
+
+def test_build_retrieve_envelope_continue_request():
+    env = pr.build_retrieve_envelope("OpenEvent", ["SubscriberKey"], cont="req-1", token="ABC")
+    assert "<ContinueRequest>req-1</ContinueRequest>" in env
