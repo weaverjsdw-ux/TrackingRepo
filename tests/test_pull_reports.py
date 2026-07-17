@@ -251,3 +251,25 @@ def test_render_report_pdf_smoke(tmp_path):
         text = pdf.pages[0].extract_text()
     assert "Engagement Tracking Report" in text
     assert "1,051" in text and "415" in text  # delivered + unique opens present
+
+
+def test_build_api_sheet_plan_values():
+    send = {"NumberSent": "1086", "NumberDelivered": "1051", "UniqueOpens": "415",
+            "UniqueClicks": "9", "Subject": "Hello"}
+    plan = pr.build_api_sheet_plan(send, total_opens=675, bh=2)
+    v = plan.values
+    assert v["# Total sent"] == 1086
+    assert v["# Delivered"] == 1051
+    assert v["# Unique opens"] == 415
+    assert v["# Unique clicks"] == 9
+    assert v["# Total opens"] == 675
+    assert v["Booklet landing page unique clicks"] == 2
+    assert v["Subject line"] == "Hello"
+    assert round(v["Unique open rate %"], 5) == round(415 / 1051, 5)
+
+
+def test_build_api_sheet_plan_omits_zero_booklet():
+    send = {"NumberSent": "100", "NumberDelivered": "100", "UniqueOpens": "10",
+            "UniqueClicks": "0", "Subject": "Hi"}
+    plan = pr.build_api_sheet_plan(send, total_opens=12, bh=0)
+    assert "Booklet landing page unique clicks" not in plan.values

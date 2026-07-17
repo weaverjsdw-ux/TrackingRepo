@@ -31,7 +31,7 @@ from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Space
 # Make the installed `tracking` package importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tracking import naming
+from tracking import naming, sheet
 
 _NAVY = colors.HexColor("#1f3a5f"); _NAVY2 = colors.HexColor("#26425f"); _GREEN = colors.HexColor("#2f7d68")
 _ORANGE = colors.HexColor("#c2792f"); _GRAY = colors.HexColor("#64707d"); _LINE = colors.HexColor("#d9dee5")
@@ -479,3 +479,37 @@ def render_report_pdf(path, identity, send, total_opens, total_clicks, bh):
                      "ExactTarget's document.", _sty(fontName="Helvetica-Oblique", fontSize=7.5, textColor=_MUTE))
     E.append(KeepTogether([Paragraph("Delivery Funnel", hdr), d, Spacer(1, 8), foot]))
     doc.build(E)
+
+
+def build_api_sheet_plan(send, total_opens, bh):
+    """Map SFMC aggregates directly onto the Print Status Report headers.
+
+    Deliberately does NOT reuse sheet.build_sheet_plan (that is PDF/file-count
+    oriented, spec §5.5). Only sheet.write_send's row-match/fill-blank logic is
+    reused, on the SheetPlan built here.
+    """
+    def n(x):
+        try:
+            return int(x or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    sent = n(send.get("NumberSent")); deliv = n(send.get("NumberDelivered"))
+    uo = n(send.get("UniqueOpens")); uc = n(send.get("UniqueClicks"))
+    plan = sheet.SheetPlan()
+    plan.values["# Total sent"] = sent
+    plan.values["# Delivered"] = deliv
+    plan.values["# Unique opens"] = uo
+    plan.values["# Unique clicks"] = uc
+    plan.values["# Total opens"] = int(total_opens)
+    if bh:
+        plan.values["Booklet landing page unique clicks"] = int(bh)
+    else:
+        plan.flags.append("BH = 0 — booklet cell omitted; confirm the booklet link.")
+    if deliv:
+        plan.values["Unique open rate %"] = round(uo / deliv, 5)
+        plan.values["Unique click-through %"] = round(uc / deliv, 5)
+    subject = send.get("Subject")
+    if subject:
+        plan.values["Subject line"] = subject
+    return plan
