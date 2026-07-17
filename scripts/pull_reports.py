@@ -33,6 +33,7 @@ from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Space
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tracking import naming, sheet
+from tracking.drafts import DraftEmail
 
 _NAVY = colors.HexColor("#1f3a5f"); _NAVY2 = colors.HexColor("#26425f"); _GREEN = colors.HexColor("#2f7d68")
 _ORANGE = colors.HexColor("#c2792f"); _GRAY = colors.HexColor("#64707d"); _LINE = colors.HexColor("#d9dee5")
@@ -587,3 +588,80 @@ def mark_calendar(writer_for_tab, send_date_iso, identity, mark, fill_blanks_onl
     else:
         result["status"] = "not-found"
     return result
+
+
+_KATHRYN = "kathryn.baugh@pentera.com"
+
+
+def lead_scoring_filename(de_name, when):
+    """Return filename: <de_name><YYYYMMDD>.csv"""
+    return f"{de_name}{when.strftime('%Y%m%d')}.csv"
+
+
+def resolve_lead_de(client, de_name_or_key, client_name):
+    """Return (Name, CustomerKey). Prefer the explicit manifest value; else derive
+    'sd_<Client> - Lead Scoring'. Fail loud if not found or ambiguous."""
+    target = (de_name_or_key or "").strip() or f"sd_{client_name} - Lead Scoring"
+
+    def _lookup(prop, value):
+        filt = (f'<Filter xsi:type="SimpleFilterPart"><Property>{prop}</Property>'
+                f"<SimpleOperator>equals</SimpleOperator><Value>{value}</Value></Filter>")
+        return client.retrieve("DataExtension", ["Name", "CustomerKey"], filt)
+
+    rows = _lookup("CustomerKey", target) or _lookup("Name", target)
+    if not rows:
+        raise SfmcError(f"Lead Scoring DE not found for {target!r}.")
+    if len(rows) > 1:
+        names = ", ".join(sorted(r.get("Name") or "" for r in rows))
+        raise SfmcError(f"Ambiguous Lead Scoring DE for {target!r}: {names}. Set lead_scoring_de explicitly.")
+    return rows[0]["Name"], rows[0]["CustomerKey"]
+
+
+def de_ordered_columns(client, customer_key):
+    """Return list of field names ordered by DataExtensionField.Ordinal."""
+    filt = (f'<Filter xsi:type="SimpleFilterPart"><Property>DataExtension.CustomerKey</Property>'
+            f"<SimpleOperator>equals</SimpleOperator><Value>{customer_key}</Value></Filter>")
+    rows = client.retrieve("DataExtensionField", ["Name", "Ordinal"], filt)
+    def _ord(r):
+        o = r.get("Ordinal")
+        return int(o) if (o and str(o).isdigit()) else 999
+    return [r["Name"] for r in sorted(rows, key=_ord) if r.get("Name")]
+
+
+def write_lead_scoring_csv(folder, de_name, columns, rows, when):
+    """Write lead scoring CSV with columns in ordinal order.
+
+    Maps REST lowercased field names back to proper-cased column names.
+    Returns the written filename.
+    """
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    name = lead_scoring_filename(de_name, when)
+    # REST rowset lowercases field names; map back to the ordinal-cased column.
+    lower = {c.lower(): c for c in columns}
+    with open(folder / name, "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.writer(fh)
+        w.writerow(columns)
+        for r in rows:
+            norm = {k.lower(): v for k, v in r.items()}
+            w.writerow([norm.get(c.lower(), "") for c in columns])
+    return name
+
+
+def build_kathryn_draft(identity, lead_file_path, hipaa):
+    """Build a notification draft for Kathryn.
+
+    When hipaa is True, return None (caller flags + skips).
+    When False, return a DraftEmail to kathryn.baugh@pentera.com, notification-only,
+    with attachments == [] (lead CSV is NOT attached; Client Access upload is Kathy's step).
+    Body references the local filename.
+    """
+    if hipaa:
+        return None
+    p = Path(lead_file_path)
+    body = (
+        f"The lead score for {identity.client} {identity.season} {identity.year} {identity.type} "
+        f"is ready for Client Access upload.\n\n"
+        f"File: {p.name}\nLocation: {p.parent}\n"
+    )
+    return DraftEmail(to=[_KATHRYN], subject=f"Lead Score Ready - {identity.prefix}", body=body, attachments=[])

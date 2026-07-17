@@ -337,3 +337,33 @@ def test_mark_calendar_ambiguous_across_both_tabs_writes_nothing():
     assert {c["tab"] for c in res["candidates"]} == {"June 2026", "July 2026"}
     assert res["candidates"][0]["type"] == "eQC"  # candidates carry client/type
     assert june.updates == [] and july.updates == []  # nothing written when ambiguous
+
+
+import datetime as _dt
+from tracking.drafts import DraftEmail
+
+
+def test_lead_scoring_filename():
+    name = pr.lead_scoring_filename("sd_Example College - Lead Scoring", _dt.date(2026, 7, 15))
+    assert name == "sd_Example College - Lead Scoring20260715.csv"
+
+
+def test_write_lead_scoring_csv_uses_ordinal_columns(tmp_path):
+    cols = ["SubscriberKey", "Score", "Class Year"]
+    rows = [{"subscriberkey": "a@x", "score": "5", "class year": "2027"}]
+    name = pr.write_lead_scoring_csv(tmp_path, "sd_Example College - Lead Scoring", cols, rows, _dt.date(2026, 7, 15))
+    text = (tmp_path / name).read_text(encoding="utf-8-sig")
+    assert text.splitlines()[0] == "SubscriberKey,Score,Class Year"
+    assert "a@x,5,2027" in text
+
+
+def test_build_kathryn_draft_notification_only():
+    d = pr.build_kathryn_draft(_identity(), Path("/abs/Lead Scoring/sd_Example College - Lead Scoring20260715.csv"), hipaa=False)
+    assert isinstance(d, DraftEmail)
+    assert d.to == ["kathryn.baugh@pentera.com"]
+    assert d.attachments == []  # notification only, never attach the lead file
+    assert "sd_Example College - Lead Scoring20260715.csv" in d.body
+
+
+def test_build_kathryn_draft_hipaa_skips():
+    assert pr.build_kathryn_draft(_identity(), Path("/abs/x.csv"), hipaa=True) is None
