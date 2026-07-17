@@ -223,3 +223,50 @@ class SfmcClient:
                 break
             page += 1
         return out
+
+
+def dedup_by_subscriber(rows):
+    """Keep the earliest EventDate row per SubscriberKey (stable)."""
+    seen = set()
+    out = []
+    for r in sorted(rows, key=lambda x: x.get("EventDate") or ""):
+        k = r.get("SubscriberKey")
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
+def usdate(iso):
+    """ISO 'YYYY-MM-DDThh:mm:ss' -> US 'M/D/YYYY h:mm AM/PM' (matches UI export)."""
+    if not iso:
+        return ""
+    d, _, t = iso.partition("T")
+    try:
+        y, mo, da = d.split("-")
+        hh = int(t.split(":")[0])
+        mm = t.split(":")[1][:2]
+    except Exception:
+        return iso
+    ap = "AM" if hh < 12 else "PM"
+    h12 = hh % 12 or 12
+    return f"{int(mo)}/{int(da)}/{int(y)} {h12}:{mm} {ap}"
+
+
+def bounce_kind(row):
+    """Hard/Soft explicit; everything else -> block (== Send.OtherBounces line)."""
+    c = (row.get("BounceCategory") or "").lower()
+    return "hard" if c.startswith("hard") else "soft" if c.startswith("soft") else "block"
+
+
+def bounce_reason(row):
+    c = row.get("BounceCategory") or ""
+    return c.split(" - ", 1)[1] if " - " in c else c
+
+
+def booklet_rows(clicks, selector):
+    """Deduped clicks whose URL contains the per-send booklet selector."""
+    if not selector:
+        return []
+    matched = [r for r in clicks if selector.lower() in (r.get("URL") or "").lower()]
+    return dedup_by_subscriber(matched)

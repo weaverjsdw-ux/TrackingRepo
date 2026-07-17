@@ -140,3 +140,39 @@ def test_get_de_rows_rest_merges_keys_and_values():
     rows = c.get_de_rows_rest("KEY-123")
     assert rows == [{"subscriberkey": "a@x", "score": "5", "donor id": "9"}]
     assert "/data/v1/customobjectdata/key/KEY-123/rowset" in t.gets[0][0]
+
+
+def test_dedup_keeps_earliest_per_subscriber():
+    rows = [
+        {"SubscriberKey": "a@x", "EventDate": "2026-06-02T10:00:00"},
+        {"SubscriberKey": "a@x", "EventDate": "2026-06-01T09:00:00"},
+        {"SubscriberKey": "b@x", "EventDate": "2026-06-01T08:00:00"},
+    ]
+    out = pr.dedup_by_subscriber(rows)
+    keys = {r["SubscriberKey"]: r["EventDate"] for r in out}
+    assert keys == {"a@x": "2026-06-01T09:00:00", "b@x": "2026-06-01T08:00:00"}
+
+
+def test_usdate_formats_us_style():
+    assert pr.usdate("2026-06-24T14:05:00") == "6/24/2026 2:05 PM"
+    assert pr.usdate("2026-01-03T00:30:00") == "1/3/2026 12:30 AM"
+    assert pr.usdate("") == ""
+
+
+def test_bounce_kind_and_reason():
+    assert pr.bounce_kind({"BounceCategory": "Hard bounce - Bad address"}) == "hard"
+    assert pr.bounce_kind({"BounceCategory": "Soft bounce - Mailbox full"}) == "soft"
+    assert pr.bounce_kind({"BounceCategory": "Technical/Other"}) == "block"
+    assert pr.bounce_kind({"BounceCategory": None}) == "block"
+    assert pr.bounce_reason({"BounceCategory": "Hard bounce - Bad address"}) == "Bad address"
+    assert pr.bounce_reason({"BounceCategory": "Block"}) == "Block"
+
+
+def test_booklet_rows_filters_by_selector_and_dedups():
+    clicks = [
+        {"SubscriberKey": "a@x", "EventDate": "2026-06-01T09:00:00", "URL": "https://c.giftplans.org/index.php?cID=5&v=enlA&utm=1"},
+        {"SubscriberKey": "a@x", "EventDate": "2026-06-01T10:00:00", "URL": "https://c.giftplans.org/index.php?cID=5&v=enlA&utm=2"},
+        {"SubscriberKey": "c@x", "EventDate": "2026-06-01T09:00:00", "URL": "https://c.giftplans.org/article-1"},
+    ]
+    out = pr.booklet_rows(clicks, "v=enlA")
+    assert [r["SubscriberKey"] for r in out] == ["a@x"]  # deduped, article excluded
