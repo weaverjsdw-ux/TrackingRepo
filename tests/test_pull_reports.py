@@ -9,6 +9,8 @@ pr = importlib.util.module_from_spec(_spec)
 sys.modules["pull_reports"] = pr
 _spec.loader.exec_module(pr)
 
+from tracking import naming
+
 
 def test_manifest_round_trip(tmp_path):
     p = tmp_path / "manifest.json"
@@ -176,3 +178,58 @@ def test_booklet_rows_filters_by_selector_and_dedups():
     ]
     out = pr.booklet_rows(clicks, "v=enlA")
     assert [r["SubscriberKey"] for r in out] == ["a@x"]  # deduped, article excluded
+
+
+def _events(sent=2, opens=2, clicks=2, bounces=(), unsubs=0, booklet_url="v=enlA"):
+    mk = lambda i, extra=None: {"SubscriberKey": f"u{i}@x", "EventDate": f"2026-06-0{i%9+1}T09:00:00", **(extra or {})}
+    return {
+        "sent": [mk(i) for i in range(sent)],
+        "open": [mk(i) for i in range(opens)],
+        "click": [mk(i, {"URL": f"https://c/index.php?cID=5&{booklet_url}"}) for i in range(clicks)],
+        "bounce": list(bounces),
+        "unsub": [mk(i) for i in range(unsubs)],
+    }
+
+
+def _identity():
+    return naming.SendIdentity(client="Example College", season="Spring", year="2026", type="eNL")
+
+
+def test_compute_metrics_counts_and_bh():
+    m = pr.compute_metrics(_events(sent=3, opens=2, clicks=2), "v=enlA")
+    assert m["counts"]["Total Sent"] == 3
+    assert m["counts"]["Unique Opens"] == 2
+    assert m["counts"]["Unique Clicks"] == 2
+    assert m["BH"] == 2  # both clicks match v=enlA, distinct subscribers
+
+
+def test_core_gate_total_sent_zero_fails():
+    status, flags = pr.evaluate_core_gate({"Total Sent": 0, "Unique Opens": 5, "Unique Clicks": 5}, False)
+    assert status == "failed"
+
+
+def test_core_gate_zero_opens_needs_confirmation_then_released():
+    status, _ = pr.evaluate_core_gate({"Total Sent": 9, "Unique Opens": 0, "Unique Clicks": 3}, False)
+    assert status == "needs_confirmation"
+    status2, _ = pr.evaluate_core_gate({"Total Sent": 9, "Unique Opens": 0, "Unique Clicks": 3}, True)
+    assert status2 == "ok"
+
+
+def test_optional_flags_for_zero_metrics():
+    flags = pr.optional_flags({"Block Bounces": 0, "Unsubscribes": 4, "Request Your": 0})
+    joined = " ".join(flags)
+    assert "Block Bounces" in joined and "Request Your" in joined
+    assert "Unsubscribes" not in joined
+
+
+def test_write_engagement_csvs_data_driven(tmp_path):
+    m = pr.compute_metrics(_events(sent=2, opens=2, clicks=1), "v=enlA")
+    # Force one optional metric empty to prove the empty file is skipped.
+    m["rows"]["Block Bounces"] = []
+    files = pr.write_engagement_csvs(tmp_path, _identity(), m["rows"])
+    assert "Example College Spring 2026 eNL - Total Sent.csv" in files
+    assert not any("Block Bounces" in f for f in files)  # empty -> skipped
+    # Header + email-as-key content check on Total Sent.
+    content = (tmp_path / "Example College Spring 2026 eNL - Total Sent.csv").read_text(encoding="utf-8-sig")
+    assert content.splitlines()[0] == "Subscriber Key,Email Address"
+    assert "u0@x,u0@x" in content

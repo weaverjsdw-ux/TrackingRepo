@@ -11,6 +11,7 @@ Run with the repo venv:  ./.venv/Scripts/python.exe scripts/pull_reports.py <cmd
 """
 from __future__ import annotations
 
+import csv
 import datetime
 import json
 import sys
@@ -21,6 +22,8 @@ from pathlib import Path
 
 # Make the installed `tracking` package importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from tracking import naming
 
 # ── booklet selector defaults by send type (a RULE; the value is confirmed
 # per send in the manifest). eNL newsletters tag the booklet link v=enlA;
@@ -270,3 +273,87 @@ def booklet_rows(clicks, selector):
         return []
     matched = [r for r in clicks if selector.lower() in (r.get("URL") or "").lower()]
     return dedup_by_subscriber(matched)
+
+
+# CSV column layout per metric: (header, row-builder). SubscriberKey doubles as
+# Email Address in this account (spec §5.2). Booklet reuses the clicks layout.
+_CORE = ("Total Sent", "Unique Opens", "Unique Clicks")
+_OPTIONAL = ("Hard Bounces", "Soft Bounces", "Block Bounces", "Unsubscribes", "Request Your")
+
+_CSV_LAYOUT = {
+    "Total Sent": (["Subscriber Key", "Email Address"],
+                   lambda r: [r["SubscriberKey"], r["SubscriberKey"]]),
+    "Unique Opens": (["Subscriber Key", "Email Address", "Time Opened"],
+                     lambda r: [r["SubscriberKey"], r["SubscriberKey"], usdate(r.get("EventDate"))]),
+    "Unique Clicks": (["Subscriber Key", "Email Address", "Click-Through Time", "Link Clicked"],
+                      lambda r: [r["SubscriberKey"], r["SubscriberKey"], usdate(r.get("EventDate")), r.get("URL")]),
+    "Request Your": (["Subscriber Key", "Email Address", "Click-Through Time", "Link Clicked"],
+                     lambda r: [r["SubscriberKey"], r["SubscriberKey"], usdate(r.get("EventDate")), r.get("URL")]),
+    "Unsubscribes": (["Subscriber Key", "Email Address", "Unsubscribed Time"],
+                     lambda r: [r["SubscriberKey"], r["SubscriberKey"], usdate(r.get("EventDate"))]),
+}
+_BOUNCE_HEADER = ["Subscriber Key", "Email Address", "Undelivered Time", "Bounce Reason", "Bounce Description"]
+_BOUNCE_ROW = lambda r: [r["SubscriberKey"], r["SubscriberKey"], usdate(r.get("EventDate")),
+                         bounce_reason(r), r.get("SMTPReason")]
+for _b in ("Hard Bounces", "Soft Bounces", "Block Bounces"):
+    _CSV_LAYOUT[_b] = (_BOUNCE_HEADER, _BOUNCE_ROW)
+
+
+def compute_metrics(events, booklet_selector):
+    sent = dedup_by_subscriber(events["sent"])
+    opens = dedup_by_subscriber(events["open"])
+    clicks_raw = events["click"]
+    clicks = dedup_by_subscriber(clicks_raw)
+    booklet = booklet_rows(clicks_raw, booklet_selector)
+    unsub = dedup_by_subscriber(events["unsub"])
+    bounces = {kind: dedup_by_subscriber([r for r in events["bounce"] if bounce_kind(r) == kind])
+               for kind in ("hard", "soft", "block")}
+    rows = {
+        "Total Sent": sent,
+        "Unique Opens": opens,
+        "Unique Clicks": clicks,
+        "Request Your": booklet,
+        "Hard Bounces": bounces["hard"],
+        "Soft Bounces": bounces["soft"],
+        "Block Bounces": bounces["block"],
+        "Unsubscribes": unsub,
+    }
+    counts = {k: len(v) for k, v in rows.items()}
+    return {
+        "rows": rows,
+        "counts": counts,
+        "BH": len(booklet),
+        "Total Opens": len(events["open"]),
+        "Total Clicks": len(events["click"]),
+    }
+
+
+def evaluate_core_gate(counts, confirm_zero):
+    if counts.get("Total Sent", 0) == 0:
+        return "failed", ["Total Sent = 0 — pull looks broken; refusing to proceed."]
+    zeros = [m for m in ("Unique Opens", "Unique Clicks") if counts.get(m, 0) == 0]
+    if zeros and not confirm_zero:
+        return "needs_confirmation", [f"{m} = 0 — confirm before writing side effects." for m in zeros]
+    return "ok", [f"{m} = 0 — confirmed by operator." for m in zeros] if zeros else []
+
+
+def optional_flags(counts):
+    return [f"{m}: 0 — no file written" for m in _OPTIONAL if counts.get(m, 0) == 0]
+
+
+def write_engagement_csvs(folder, identity, metric_rows):
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    written = []
+    for metric, (header, build_row) in _CSV_LAYOUT.items():
+        rows = metric_rows.get(metric) or []
+        if not rows:
+            continue  # data-driven: skip empty/absent metrics
+        desc = naming.REQUEST_FILE_DESCRIPTION if metric == "Request Your" else metric
+        name = naming.finished_csv_name(identity, desc)
+        with open(folder / name, "w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.writer(fh)
+            w.writerow(header)
+            w.writerows(build_row(r) for r in rows)
+        written.append(name)
+    return written
