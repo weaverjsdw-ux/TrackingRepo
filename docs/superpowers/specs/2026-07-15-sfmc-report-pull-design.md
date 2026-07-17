@@ -1,7 +1,7 @@
 # Design — Manifest-driven SFMC report pull (`pull_reports`)
 
 **Date:** 2026-07-15
-**Status:** Approved design; ready for an implementation plan.
+**Status:** Amended per operator review (2026-07-15); awaiting final approval before the implementation plan.
 **Author/operator:** John Weaver (Pentera). Solo-operated automation.
 
 ---
@@ -43,13 +43,19 @@ The single organizing idea:
 2. Engagement CSVs are **data-driven** — the file set follows the metrics that have data.
 3. **Core** engagement metrics (Total Sent, Unique Opens, Unique Clicks) must be retrieved
    successfully. Total Sent = 0 fails the send loud (a zero-recipient pull is broken); a
-   zero Unique Opens or Unique Clicks is flagged loudly for operator confirmation, never
-   silently accepted. **Optional** metrics (Hard/Soft/Block Bounces, Unsubscribes, booklet)
-   may be zero/absent, but must be **flagged** (and the empty file is skipped).
+   zero Unique Opens or Unique Clicks puts the send in **`needs_confirmation`** and
+   **blocks all its side effects** (sheet, calendar, drafts) until the operator confirms
+   (§5.2). **Optional** metrics (Hard/Soft/Block Bounces, Unsubscribes, booklet) may be
+   zero/absent, but must be **flagged** (and the empty file is skipped).
 4. Lead Scoring is a **separate workflow**, saved verbatim-style as
    `sd_<Client> - Lead Scoring<YYYYMMDD>.csv` (never renamed).
 5. Sheet and calendar writes are **fill-blank-only** unless explicitly `--force`d.
 6. Gmail **creates drafts only, never sends**.
+7. **HIPAA is a required per-send fact** (no default). If `hipaa` is absent for a send, that
+   send fails loud. HIPAA sends export the data file but **never** trigger the Kathryn
+   notification — it is skipped and flagged (PC routing is out of scope).
+8. **`--dry-run` mutates nothing** — no files, drafts, sheet/calendar writes, or per-send
+   manifest results (§4).
 
 ### Facts (only in the manifest, never in code)
 
@@ -84,7 +90,8 @@ made concrete.
       "send_id": "691994",
       "booklet_selector": "v=enlA",        // type-rule prefills; operator confirms
       "lead_scoring_de": "sd_Yale New Haven Hospital - Lead Scoring", // optional; else derived
-      "hipaa": false,
+      "hipaa": false,                      // REQUIRED per send — no default; absent → send fails loud
+      "confirm_zero": false,               // set true (or pass --confirm-zero <id>) to release a needs_confirmation send
 
       // ── tool-resolved results (output, written back) ──
       "send_date": "2026-06-…",
@@ -99,7 +106,7 @@ made concrete.
       "calendar": { "tab": "June 2026", "cell": "Y17", "status": "written" },
       "drafts":   { "report": "<draft_id>", "kathryn": "<draft_id|null>" },
       "flags":    [ "Block Bounces: 0 — no file written" ],
-      "status":   "complete",
+      "status":   "complete",              // complete | needs_confirmation | partial | failed
       "errors":   []
     }
   ]
@@ -110,6 +117,10 @@ The manifest also provides **draft idempotency for free**: a re-run skips any dr
 id is already recorded (and still exists in Gmail), so re-runs never pile up duplicate
 drafts. There is **no `%TEMP%` state** — the PDF and sheet values are computed live from
 the `Send` object + events on every run.
+
+**The manifest is private.** It holds client names, SendIDs, counts, sheet cells, local
+paths, and Gmail draft IDs, so `runs/` is git-ignored (§7); only a redacted
+`runs/example/manifest.example.json` is committed as the schema reference.
 
 ## 4. Architecture
 
@@ -136,8 +147,17 @@ The existing REST-probe `src/tracking/sfmc.py` is a **different, non-working pat
   type-rule prefills `booklet_selector`. The operator fills in the run's facts.
 - **`build`** — read the manifest; for each send run the pipeline (§5); write results back
   to the manifest. Flags: `--force` (write non-blank cells too), `--only <send_id>`,
-  `--skip-drafts`, `--skip-calendar`, `--dry-run`.
+  `--confirm-zero <send_id>` (release a `needs_confirmation` send's side effects; equivalent
+  to setting `confirm_zero: true`), `--skip-drafts`, `--skip-calendar`, `--dry-run`.
 - **`status`** — print purely from the manifest. This is the authoritative "what happened."
+
+**`--dry-run` semantics (mutates nothing).** A dry run reads the SFMC/Sheet/Calendar APIs
+and computes the full plan for each send — the CSV set it *would* write, the sheet row +
+cells it *would* fill, the calendar tab + cell (with **all candidate blocks** listed when
+not found/ambiguous, §5.6), and the draft recipients + attachments — then **writes
+nothing**: no CSV/PDF/lead files, no drafts, no sheet or calendar updates, and no per-send
+`sends[]` results in the manifest. (Optional `--save-plan` may write a clearly-labelled
+top-level `last_dry_run` block for `status` to show; it never touches per-send results.)
 
 ## 5. The per-send pipeline (one API pull → outputs)
 
@@ -171,7 +191,10 @@ description)` and `naming.REQUEST_FILE_DESCRIPTION` for the booklet. Each row is
 SubscriberKey (keep earliest EventDate); dates rendered US-style `M/D/YYYY h:mm AM/PM`.
 
 - **Core (required):** Total Sent, Unique Opens, Unique Clicks. Total Sent = 0 → fail the
-  send; zero Unique Opens or Unique Clicks → loud flag for operator confirmation.
+  send (`status: failed`). Zero Unique Opens or Unique Clicks → `status: needs_confirmation`:
+  the local CSVs/PDF are still written for inspection, but the **shared side effects — sheet,
+  calendar, and drafts — are skipped** for that send until it is released via
+  `confirm_zero: true` or `--confirm-zero <send_id>`.
 - **Optional (0/absent → record 0, flag, skip empty file):** Hard Bounces, Soft Bounces,
   Block Bounces, Unsubscribes, Request Your (booklet).
 - **Booklet / BH:** `BH = ` count of deduped clicks whose URL contains
@@ -213,14 +236,19 @@ Self-contained section; **not** tangled into engagement CSV generation.
   `kathryn.baugh@pentera.com` whose body references the **local folder + filename** — the
   Lead Scoring CSV is **not attached** (Client Access upload is Kathy's step). Records the
   draft id in the manifest.
-- **HIPAA (`hipaa: true`):** **skip** the Kathryn draft entirely and **flag**
-  ("HIPAA — PC routing not yet designed"). The HIPAA→PC delivery branch is out of scope.
+- **HIPAA — `hipaa` is a REQUIRED per-send fact; if absent the send fails loud** (never
+  assume non-HIPAA). When `true`, **skip** the Kathryn draft and attachment entirely and
+  **flag** ("HIPAA — PC routing not yet designed"); the data-file export itself still runs.
+  The HIPAA→PC delivery branch is out of scope.
 
 ### 5.5 Print Status Report write (Rule 5)
 
-Build a `sheet.SheetPlan` from the API values and call `sheet.write_send(writer, identity,
-plan)` (header row index 2, Client+Type match, season tiebreak, `fill_blanks_only` unless
-`--force`). Reuses the existing safe matching wholesale. Values sourced from the API:
+**Construct the `sheet.SheetPlan` directly** from the API aggregates below, then call
+`sheet.write_send(writer, identity, plan)` (header row index 2, Client+Type match, season
+tiebreak, `fill_blanks_only` unless `--force`). **Do not reuse `build_sheet_plan`** — it is
+oriented to PDF/file-count sources (its `COLUMN_SOURCES` kinds are `pdf`/`file`) and would
+shoehorn API aggregates into the wrong assumptions. Only `write_send`'s row-matching and
+fill-blank logic is reused. Values sourced from the API:
 
 | Sheet header | Source |
 |---|---|
@@ -248,7 +276,9 @@ Tracking Reports calendar (`1eTZXc9bNaRbMWmFeJPPc56LCmbO42egvkJy1Sjo89is`).
   target the "Engagement Reports downloaded on/by" cell at name-col `+4`. Fill only if
   blank; mark `<run-date M/D> <initials>` (e.g. `7/15 JS`).
 - **Not found / ambiguous → flag, do not guess.** Record resolved `tab` + `cell` +
-  `status` in the manifest.
+  `status` in the manifest, and in `status` / `--dry-run` **print every candidate block**
+  considered (tab, client, type, date-context, row) — not merely "flagged" — so the
+  operator can resolve it by hand.
 
 ### 5.7 Report delivery draft (Rule 6)
 
@@ -272,13 +302,32 @@ file is silently skipped). Records the draft id in the manifest.
   Files land only in the gitignored report / `Lead Scoring/` folders; no cell values are
   logged; the Kathryn draft carries no attachment; HIPAA sends skip Kathryn entirely.
 
-## 7. Configuration
+## 7. Configuration and in-scope repo changes
 
-From `.env` (already present): `SFMC_AUTH_BASE_URL`, `SFMC_REST_BASE_URL`,
+**Env (`.env`, already present):** `SFMC_AUTH_BASE_URL`, `SFMC_REST_BASE_URL`,
 `SFMC_SOAP_BASE_URL`, `SFMC_CLIENT_ID`, `SFMC_CLIENT_SECRET`, `SHEET_ID`, `SHEET_TAB`,
 `GOOGLE_SHEETS_SERVICE_ACCOUNT`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_TOKEN_PATH`,
 `REPORTS_DIR`. New (optional, with defaults): `LEAD_SCORING_DIR` (default
 `<REPORTS_DIR>/Lead Scoring`), `CALENDAR_ID`, `CALENDAR_MARK_INITIALS` (default `JS`).
+
+Because the prior scatter is the problem this build fights, these repo changes are **in
+scope for this build**, not follow-ups:
+
+- **`.gitignore` hardening:** add `runs/` (the manifest holds PII) with a
+  `!runs/example/manifest.example.json` exception; and add the **missing `* eQC - *.csv`**
+  pattern — only `eNL`/`ePC` metric CSVs are ignored today, so eQC files (Monmouth, Mount
+  Vernon, Alaska, …) would leak. Lead Scoring files are already covered by `sd_*.csv`.
+- **`pyproject.toml`:** add `reportlab>=4.0` (a new `reports` extra, or a core dep). The
+  Calendar API reuses `google-api-python-client` + `google-auth`, already in the `sheets`
+  extra.
+- **`.env.example`:** add `SFMC_SOAP_BASE_URL`, `CALENDAR_ID`, `LEAD_SCORING_DIR`,
+  `CALENDAR_MARK_INITIALS`, and un-comment/reframe `SHEET_ID` / `GOOGLE_SHEETS_SERVICE_ACCOUNT`
+  and the SFMC block away from the old probe/stage framing.
+- **Docs:** update `README.md` and `docs/AUTOMATION_STATUS.md` so operators are pointed at
+  `pull_reports.py` (manifest-driven, PDF reconstructed from the API), not the old
+  `sfmc-stage` / overview-PDF-required path.
+- **`runs/example/manifest.example.json`:** a redacted example manifest committed as the
+  schema reference.
 
 ## 8. Out of scope / deferred
 
@@ -290,19 +339,32 @@ From `.env` (already present): `SFMC_AUTH_BASE_URL`, `SFMC_REST_BASE_URL`,
 
 ## 9. Follow-ups (not this build)
 
-- Reconcile stale docs: `AUTOMATION_BRIEF.md` still says "no ExactTarget," which is now
-  outdated; and the repo carries uncommitted changes + an untracked `SFMC_INTEGRATION_PLAN.md`
-  — the same scatter this design fights. Commit/curate separately.
+- Reconcile the remaining stale doc `AUTOMATION_BRIEF.md` (still says "no ExactTarget"), and
+  curate the pre-existing uncommitted working-tree changes + untracked
+  `SFMC_INTEGRATION_PLAN.md` — the same scatter this design fights, but outside this build's
+  commit scope (§11). (README + `AUTOMATION_STATUS.md` are updated *in* this build, §7.)
 - Consider graduating the SFMC client + manifest sections into package modules (with tests)
   once the single-script version is proven over a full month.
 
 ## 10. Verification approach
 
 - **Offline:** unit-test the pure logic that has no network — manifest read/write/enrich,
-  the data-driven CSV selection (core-required / optional-flagged / booklet-zero), US date
-  formatting, bounce split, calendar tab derivation, and the API-values → `SheetPlan`
-  mapping — using synthetic `Send`/event fixtures. Keep the suite credential-free.
+  the data-driven CSV selection (core-required / optional-flagged / booklet-zero), the
+  **zero-core gate** (`needs_confirmation` blocks side effects; `--confirm-zero` releases),
+  the **HIPAA-required guard** (absent → fail; true → Kathryn skipped), US date formatting,
+  bounce split, calendar tab derivation + candidate listing, and the API-values →
+  `SheetPlan` mapping — using synthetic `Send`/event fixtures. Keep the suite
+  credential-free. Baseline today is green (**119 passed**); the new tests extend it and
+  must keep CI (`pytest -m "not realdata"`) green.
 - **Live (operator):** a `--dry-run build` prints planned files, sheet cells, calendar
   cell, and draft recipients/attachments without writing; then a real `build` on one send
   end-to-end, verified against the known-good numbers (the six sends already pulled tie out
   to the `Send` object exactly; booklet counts match the known BH values).
+
+## 11. Approval scope
+
+This spec is the only artifact approved here. Approval explicitly **does not** cover the
+pre-existing dirty working-tree changes on `automation-followups-consolidated`
+(`src/tracking/filing.py`, `tests/test_cli.py`, `tests/test_filing.py`,
+`drop/.intake_state.json`) or the untracked `docs/SFMC_INTEGRATION_PLAN.md`; those are
+unrelated and are curated separately (§9). The spec commit touches only this design file.
