@@ -11,9 +11,11 @@ Run with the repo venv:  ./.venv/Scripts/python.exe scripts/pull_reports.py <cmd
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import datetime
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -32,7 +34,7 @@ from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Space
 # Make the installed `tracking` package importable when run as a bare script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tracking import naming, sheet
+from tracking import naming, sheet, sheets_writer
 from tracking.drafts import DraftEmail
 
 _NAVY = colors.HexColor("#1f3a5f"); _NAVY2 = colors.HexColor("#26425f"); _GREEN = colors.HexColor("#2f7d68")
@@ -687,3 +689,276 @@ def build_report_draft(identity, folder):
     )
     attachments = ([pdf] if pdf.is_file() else []) + csvs
     return DraftEmail(to=[], subject=naming.email_subject(identity), body="", attachments=attachments)
+
+
+_EVENT_PROPS = {
+    "SentEvent": ["SubscriberKey", "EventDate"],
+    "OpenEvent": ["SubscriberKey", "EventDate"],
+    "ClickEvent": ["SubscriberKey", "EventDate", "URL"],
+    "BounceEvent": ["SubscriberKey", "EventDate", "BounceCategory", "SMTPReason"],
+    "UnsubEvent": ["SubscriberKey", "EventDate"],
+}
+
+
+class _RecordingWriter:
+    """Wraps a SheetWriter for --dry-run: reads real values, records intended
+    writes instead of performing them (spec §4: dry-run mutates nothing)."""
+
+    def __init__(self, source):
+        self._source = source
+        self.updates = []
+
+    def get_values(self):
+        return self._source.get_values()
+
+    def update_cell(self, row, col, value):
+        self.updates.append((row, col, value))
+
+
+def require_hipaa(send):
+    if "hipaa" not in send:
+        raise SfmcError("send is missing the required 'hipaa' flag (no default allowed).")
+    return bool(send["hipaa"])
+
+
+def _identity_of(send):
+    return naming.SendIdentity(client=send["client"], season=send["season"],
+                              year=send["year"], type=send["type"])
+
+
+def run_send(send, deps, *, force=False, dry_run=False, skip_drafts=False,
+             skip_calendar=False, confirm_zero_ids=frozenset()):
+    out = dict(send)
+    out.setdefault("flags", [])
+    out["errors"] = []
+    try:
+        hipaa = require_hipaa(send)
+        identity = _identity_of(send)
+        sfmc = deps["sfmc"]
+        sfmc.authenticate()
+        send_obj = sfmc.get_send(send["send_id"])
+        events = {key: sfmc.get_events(obj, send["send_id"], _EVENT_PROPS[obj])
+                  for obj, key in [("SentEvent", "sent"), ("OpenEvent", "open"),
+                                   ("ClickEvent", "click"), ("BounceEvent", "bounce"),
+                                   ("UnsubEvent", "unsub")]}
+        m = compute_metrics(events, send.get("booklet_selector", ""))
+        counts = dict(m["counts"]); counts["Delivered"] = int(send_obj.get("NumberDelivered") or 0)
+        confirm = bool(send.get("confirm_zero")) or (send["send_id"] in confirm_zero_ids)
+        status, gate_flags = evaluate_core_gate(m["counts"], confirm)
+        out["flags"] += gate_flags + optional_flags(m["counts"])
+        out["send_date"] = send_obj.get("SentDate")
+        out["metrics"] = {**m["counts"], "BH": m["BH"], "Total Opens": m["Total Opens"],
+                          "Total Clicks": m["Total Clicks"], "Delivered": counts["Delivered"]}
+
+        folder = deps["reports_dir"] / identity.folder_name
+        if status == "failed":
+            out["status"] = "failed"; out["errors"].append(gate_flags[0]); return out
+
+        if dry_run:
+            # Full non-mutating plan (spec §4): compute CSV set, sheet row/cells,
+            # calendar tab/cell/candidates, and draft recipients/attachments —
+            # writing no files, no drafts, no sheet/calendar cells.
+            csv_names = [naming.finished_csv_name(
+                            identity, naming.REQUEST_FILE_DESCRIPTION if k == "Request Your" else k)
+                         for k, v in m["rows"].items() if v]
+            pdf_name = naming.finished_pdf_name(identity)
+            out["csv_files"] = csv_names
+            out["pdf_file"] = pdf_name
+            override = deps.get("lead_de_override")
+            de_name = override[0] if override else resolve_lead_de(
+                sfmc, send.get("lead_scoring_de", ""), identity.client)[0]
+            out["lead_scoring_file"] = lead_scoring_filename(de_name, datetime.date.today())
+            plan = build_api_sheet_plan(send_obj, m["Total Opens"], m["BH"])
+            out["flags"] += plan.flags
+            rec = _RecordingWriter(deps["sheet_writer"])
+            try:
+                written = sheet.write_send(rec, identity, plan, fill_blanks_only=not force)
+                out["sheet"] = {"status": "dry-run",
+                                "cells": {h: f"{col_to_a1(c)}{r + 1}" for h, (r, c) in written.items()}}
+            except sheet.SheetError as exc:
+                out["sheet"] = {"status": "dry-run", "error": str(exc)}
+                out["flags"].append(f"sheet (dry-run): {exc}")
+            mark = f"{datetime.date.today().month}/{datetime.date.today().day} {deps.get('mark_initials', 'JS')}"
+            out["calendar"] = mark_calendar(
+                lambda tab: _RecordingWriter(deps["calendar_writer_for_tab"](tab)),
+                send_obj.get("SentDate"), identity, mark, fill_blanks_only=not force)
+            out["calendar"]["status"] = f"dry-run:{out['calendar']['status']}"
+            out["drafts"] = {
+                "status": "dry-run",
+                "report": {"to": [], "subject": naming.email_subject(identity),
+                           "attachments": [pdf_name] + csv_names},
+                "kathryn": (None if hipaa else
+                            {"to": [_KATHRYN], "subject": f"Lead Score Ready - {identity.prefix}"}),
+            }
+            out["status"] = "dry-run"
+            return out
+
+        # Always-safe local artifacts (files only).
+        out["csv_files"] = write_engagement_csvs(folder, identity, m["rows"])
+        pdf_name = naming.finished_pdf_name(identity)
+        render_report_pdf(folder / pdf_name, identity, send_obj, m["Total Opens"], m["Total Clicks"], m["BH"])
+        out["pdf_file"] = pdf_name
+
+        # Lead scoring (separate workflow, own folder).
+        override = deps.get("lead_de_override")
+        if override:
+            de_name, de_key, de_cols = override
+        else:
+            de_name, de_key = resolve_lead_de(sfmc, send.get("lead_scoring_de", ""), identity.client)
+            de_cols = de_ordered_columns(sfmc, de_key)
+        de_rows = sfmc.get_de_rows_rest(de_key)
+        out["lead_scoring_file"] = write_lead_scoring_csv(
+            deps["lead_dir"], de_name, de_cols, de_rows, datetime.date.today())
+
+        # Side effects are gated on needs_confirmation.
+        if status == "needs_confirmation":
+            out["status"] = "needs_confirmation"
+            out["sheet"] = {"status": "skipped"}; out["calendar"] = {"status": "skipped"}
+            out["drafts"] = {"status": "skipped"}
+            return out
+
+        # Sheet.
+        plan = build_api_sheet_plan(send_obj, m["Total Opens"], m["BH"])
+        out["flags"] += plan.flags
+        written = sheet.write_send(deps["sheet_writer"], identity, plan,
+                                  fill_blanks_only=not force)
+        out["sheet"] = {"status": "forced" if force else "blanks-filled",
+                        "cells": {h: f"{col_to_a1(c)}{r + 1}" for h, (r, c) in written.items()}}
+        out["flags"] += plan.warnings
+
+        # Calendar.
+        if skip_calendar:
+            out["calendar"] = {"status": "skipped"}
+        else:
+            mark = f"{datetime.date.today().month}/{datetime.date.today().day} {deps.get('mark_initials', 'JS')}"
+            out["calendar"] = mark_calendar(deps["calendar_writer_for_tab"], send_obj.get("SentDate"),
+                                            identity, mark, fill_blanks_only=not force)
+
+        # Drafts (idempotent via manifest draft ids).
+        out.setdefault("drafts", {})
+        if skip_drafts:
+            out["drafts"] = {"status": "skipped"}
+        else:
+            dw = deps["draft_writer"]
+            if not out["drafts"].get("report"):
+                out["drafts"]["report"] = dw.create_draft(build_report_draft(identity, folder))
+            kdraft = build_kathryn_draft(identity, deps["lead_dir"] / out["lead_scoring_file"], hipaa)
+            if kdraft is None:
+                out["drafts"]["kathryn"] = None
+                out["flags"].append("HIPAA - Kathryn notification skipped; PC routing not yet designed.")
+            elif not out["drafts"].get("kathryn"):
+                out["drafts"]["kathryn"] = dw.create_draft(kdraft)
+
+        out["status"] = "complete"
+    except Exception as exc:  # noqa: BLE001 - per-send isolation (spec §6)
+        out["status"] = "failed"
+        out["errors"].append(str(exc))
+    return out
+
+
+def _load_dotenv(path=".env"):
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+def _real_deps():
+    reports_dir = Path(os.environ.get("REPORTS_DIR", str(Path.cwd().parent)))
+    lead_dir = Path(os.environ.get("LEAD_SCORING_DIR", str(reports_dir / "Lead Scoring")))
+    sfmc = SfmcClient(
+        auth_base=os.environ["SFMC_AUTH_BASE_URL"], soap_base=os.environ.get("SFMC_SOAP_BASE_URL", ""),
+        rest_base=os.environ.get("SFMC_REST_BASE_URL", ""), client_id=os.environ["SFMC_CLIENT_ID"],
+        client_secret=os.environ["SFMC_CLIENT_SECRET"],
+    )
+    sheet_writer = sheets_writer.GoogleSheetsWriter(
+        spreadsheet_id=os.environ.get("SHEET_ID"), tab=os.environ.get("SHEET_TAB", "Sheet1"),
+        service_account=os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT", "secrets/service-account.json"))
+    cal_id = os.environ.get("CALENDAR_ID")
+
+    def calendar_writer_for_tab(tab):
+        return sheets_writer.GoogleSheetsWriter(
+            spreadsheet_id=cal_id, tab=tab,
+            service_account=os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT", "secrets/service-account.json"))
+
+    from tracking.gmail_source import GmailSource
+    draft_writer = GmailSource(
+        client_secret=os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "secrets/client_secret.json"),
+        token_path=os.environ.get("GOOGLE_TOKEN_PATH", "secrets/token.json"))
+    return {
+        "sfmc": sfmc, "reports_dir": reports_dir, "lead_dir": lead_dir,
+        "sheet_writer": sheet_writer, "calendar_writer_for_tab": calendar_writer_for_tab,
+        "draft_writer": draft_writer, "mark_initials": os.environ.get("CALENDAR_MARK_INITIALS", "JS"),
+    }
+
+
+def cmd_init(args):
+    path = manifest_path(args.run_id or default_run_id())
+    if path.exists():
+        print(f"Manifest already exists: {path}")
+        return 1
+    save_manifest(path, scaffold_manifest(args.run_id or default_run_id()))
+    print(f"Scaffolded {path} — fill in the run's sends, then `build`.")
+    return 0
+
+
+def cmd_build(args):
+    rid = args.run_id or default_run_id()
+    path = manifest_path(rid)
+    manifest = load_manifest(path)
+    deps = _real_deps()
+    confirm_ids = set(args.confirm_zero or [])
+    results = []
+    for send in manifest["sends"]:
+        if args.only and send.get("send_id") != args.only:
+            results.append(send); continue
+        out = run_send(send, deps, force=args.force, dry_run=args.dry_run,
+                       skip_drafts=args.skip_drafts, skip_calendar=args.skip_calendar,
+                       confirm_zero_ids=confirm_ids)
+        results.append(out)
+        print(f"{out.get('client')} {out.get('type')}: {out.get('status')}  "
+              f"flags={len(out.get('flags', []))} errors={out.get('errors', [])}")
+    if not args.dry_run:
+        manifest["sends"] = results
+        save_manifest(path, manifest)
+    return 0
+
+
+def cmd_status(args):
+    path = manifest_path(args.run_id or default_run_id())
+    manifest = load_manifest(path)
+    for s in manifest["sends"]:
+        print(f"- {s.get('client')} {s.get('type')} [{s.get('status', 'pending')}]")
+        for f in s.get("flags", []):
+            print(f"    flag: {f}")
+        cal = s.get("calendar", {})
+        for cand in cal.get("candidates", []):
+            print(f"    calendar candidate: {cand}")
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="pull_reports", description=__doc__)
+    parser.add_argument("--run-id", help="manifest run id (default: current YYYY-MM)")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("init", help="scaffold a run manifest").set_defaults(func=cmd_init)
+    b = sub.add_parser("build", help="pull sends and produce the package")
+    b.add_argument("--force", action="store_true", help="write non-blank sheet/calendar cells too")
+    b.add_argument("--only", help="only this send_id")
+    b.add_argument("--confirm-zero", action="append", help="release a needs_confirmation send_id")
+    b.add_argument("--skip-drafts", action="store_true")
+    b.add_argument("--skip-calendar", action="store_true")
+    b.add_argument("--dry-run", action="store_true", help="compute plans; write nothing")
+    b.set_defaults(func=cmd_build)
+    sub.add_parser("status", help="print run status from the manifest").set_defaults(func=cmd_status)
+    args = parser.parse_args(argv)
+    _load_dotenv()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

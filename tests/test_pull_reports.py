@@ -385,3 +385,132 @@ def test_build_report_draft_blank_to_absolute_attachments(tmp_path):
     assert any(n.endswith("- Total Sent.csv") for n in names)
     assert not any(n.startswith("sd_") for n in names)
     assert all(Path(p).is_absolute() for p in d.attachments)  # MAX_PATH-safe
+
+
+class FakeSheetWriter:
+    def __init__(self, grid):
+        self._grid = grid
+        self.updates = []
+
+    def get_values(self):
+        return self._grid
+
+    def update_cell(self, row, col, value):
+        self.updates.append((row, col, value))
+
+
+class FakeDraftWriter:
+    def __init__(self):
+        self.created = []
+
+    def create_draft(self, draft):
+        self.created.append(draft)
+        return f"draft-{len(self.created)}"
+
+
+class FakeSfmc:
+    """Returns fixed events/send/DE data without network."""
+    def __init__(self, send, events, de_rows, de_cols, de_name="sd_Example College - Lead Scoring", de_key="KEY"):
+        self._send = send; self._events = events
+        self._de_rows = de_rows; self._de_cols = de_cols
+        self._de_name = de_name; self._de_key = de_key
+
+    def authenticate(self): pass
+    def get_send(self, sid): return self._send
+    def get_events(self, obj, sid, props):
+        return self._events[{"SentEvent": "sent", "OpenEvent": "open", "ClickEvent": "click",
+                             "BounceEvent": "bounce", "UnsubEvent": "unsub"}[obj]]
+    def get_de_rows_rest(self, key): return self._de_rows
+
+
+def _full_sheet_grid():
+    """A Print Status header row with every column build_api_sheet_plan emits,
+    plus one all-blank data row for 'Example College' eNL."""
+    headers = ["Client", "Type", "# Total sent", "# Delivered", "# Unique opens",
+               "# Unique clicks", "# Total opens", "Booklet landing page unique clicks",
+               "Unique open rate %", "Unique click-through %", "Subject line"]
+    return [[], [], headers, ["Example College", "eNL"] + [""] * (len(headers) - 2)]
+
+
+def _deps(tmp_path, sfmc, sheet_grid=None, cal_writers=None, draft_writer=None):
+    grid = sheet_grid if sheet_grid is not None else [[], [], ["Client", "Type"], []]
+    return {
+        "sfmc": sfmc,
+        "reports_dir": tmp_path / "Completed Reports",
+        "lead_dir": tmp_path / "Lead Scoring",
+        "sheet_writer": FakeSheetWriter(grid),
+        "calendar_writer_for_tab": (lambda tab: (cal_writers or {}).get(tab, FakeCalWriter([[]]))),
+        "draft_writer": draft_writer or FakeDraftWriter(),
+        # For lead scoring, patch the DE resolution to avoid SOAP in unit tests:
+        "lead_de_override": ("sd_Example College - Lead Scoring", "KEY", ["SubscriberKey", "Score"]),
+    }
+
+
+def _send_input(**over):
+    base = {"client": "Example College", "season": "Spring", "year": "2026", "type": "eNL",
+            "send_id": "1", "booklet_selector": "v=enlA", "lead_scoring_de": "", "hipaa": False,
+            "confirm_zero": False}
+    base.update(over)
+    return base
+
+
+def test_require_hipaa_absent_raises():
+    import pytest
+    with pytest.raises(pr.SfmcError):
+        pr.require_hipaa({"client": "X"})  # no hipaa key
+    assert pr.require_hipaa({"hipaa": True}) is True
+
+
+def test_run_send_happy_path_writes_everything(tmp_path):
+    send = {"ID": "1", "Subject": "Hi", "SentDate": "2026-06-24T00:00:00", "NumberSent": "3",
+            "NumberDelivered": "3", "UniqueOpens": "2", "UniqueClicks": "2",
+            "HardBounces": "0", "SoftBounces": "0", "OtherBounces": "0", "Unsubscribes": "0"}
+    ev = _events(sent=3, opens=2, clicks=2)
+    sfmc = FakeSfmc(send, ev, de_rows=[{"subscriberkey": "a@x", "score": "5"}], de_cols=["SubscriberKey", "Score"])
+    dw = FakeDraftWriter()
+    deps = _deps(tmp_path, sfmc, sheet_grid=_full_sheet_grid(), draft_writer=dw)
+    out = pr.run_send(_send_input(), deps, confirm_zero_ids=set())
+    assert out["status"] == "complete"
+    assert deps["sheet_writer"].updates  # real sheet write happened (non-dry mode)
+    assert out["metrics"]["Total Sent"] == 3
+    assert (tmp_path / "Completed Reports" / "Example College - Spring 2026 eNL"
+            / "Example College Spring 2026 eNL - Engagement Tracking Report.pdf").exists()
+    assert out["lead_scoring_file"].startswith("sd_Example College - Lead Scoring")
+    assert len(dw.created) == 2  # report + kathryn
+
+
+def test_run_send_needs_confirmation_skips_side_effects(tmp_path):
+    send = {"ID": "1", "Subject": "Hi", "SentDate": "2026-06-24T00:00:00", "NumberSent": "5",
+            "NumberDelivered": "5", "UniqueOpens": "0", "UniqueClicks": "0",
+            "HardBounces": "0", "SoftBounces": "0", "OtherBounces": "0", "Unsubscribes": "0"}
+    ev = _events(sent=5, opens=0, clicks=0)
+    sfmc = FakeSfmc(send, ev, de_rows=[], de_cols=["SubscriberKey"])
+    dw = FakeDraftWriter()
+    deps = _deps(tmp_path, sfmc, draft_writer=dw)
+    out = pr.run_send(_send_input(), deps, confirm_zero_ids=set())
+    assert out["status"] == "needs_confirmation"
+    assert out["sheet"]["status"] == "skipped"
+    assert len(dw.created) == 0  # drafts blocked
+
+
+def test_run_send_dry_run_computes_plan_but_writes_nothing(tmp_path):
+    send = {"ID": "1", "Subject": "Hi", "SentDate": "2026-06-24T00:00:00", "NumberSent": "3",
+            "NumberDelivered": "3", "UniqueOpens": "2", "UniqueClicks": "2",
+            "HardBounces": "0", "SoftBounces": "0", "OtherBounces": "0", "Unsubscribes": "0"}
+    ev = _events(sent=3, opens=2, clicks=2)
+    sfmc = FakeSfmc(send, ev, de_rows=[{"subscriberkey": "a@x"}], de_cols=["SubscriberKey"])
+    dw = FakeDraftWriter()
+    deps = _deps(tmp_path, sfmc, sheet_grid=_full_sheet_grid(), draft_writer=dw)
+    out = pr.run_send(_send_input(), deps, dry_run=True, confirm_zero_ids=set())
+    # Nothing is mutated:
+    assert not (tmp_path / "Completed Reports").exists()   # no CSV/PDF files
+    assert not (tmp_path / "Lead Scoring").exists()        # no lead file
+    assert dw.created == []                                # no drafts created
+    assert deps["sheet_writer"].updates == []             # no real sheet write
+    # ...but the full plan IS computed (spec §4):
+    assert out["status"] == "dry-run"
+    assert out["sheet"]["cells"]["# Total sent"]          # a real A1 ref for the matched row
+    assert out["drafts"]["report"]["to"] == []
+    assert out["drafts"]["report"]["attachments"]         # pdf + csvs listed
+    assert out["calendar"]["status"].startswith("dry-run")
+    assert out["lead_scoring_file"].startswith("sd_Example College - Lead Scoring")
