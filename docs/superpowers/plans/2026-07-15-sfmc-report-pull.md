@@ -33,7 +33,7 @@
 - `scripts/pull_reports.py` — **the tool** (created incrementally, Tasks 2–12). Sections: config/constants · manifest I/O · SFMC client · metric transforms · engagement CSVs · report PDF · sheet mapping · calendar · lead scoring · drafts · orchestration/CLI.
 - `tests/test_pull_reports.py` — offline unit tests (created incrementally). Imports the script via a `sys.path` shim.
 - `.gitignore` — hardened (Task 1).
-- `pyproject.toml` — add `reportlab` (Task 1).
+- `pyproject.toml` — add `reportlab` as a **core** dependency (Task 1).
 - `.env.example` — add SFMC SOAP + calendar + lead-scoring vars (Task 1).
 - `runs/example/manifest.example.json` — committed redacted schema (Task 1).
 - `README.md`, `docs/AUTOMATION_STATUS.md` — operator docs point at the new tool (Task 13).
@@ -70,21 +70,25 @@ runs/*
 
 - [ ] **Step 2: Verify the ignore rules**
 
-```bash
-cd engagement-tracker
-git check-ignore -v "runs/2026-07/manifest.json"          # expect: a match (ignored)
-git check-ignore -v "Some Client Spring 2026 eQC - Total Sent.csv"  # expect: a match (ignored)
-git check-ignore "runs/example/manifest.example.json"; echo "exit=$?"  # expect: no output, exit=1 (NOT ignored)
+Run in PowerShell (the session's primary shell):
+
+```powershell
+git check-ignore -v "runs/2026-07/manifest.json"                    # expect: a matching rule (ignored)
+git check-ignore -v "Some Client Spring 2026 eQC - Total Sent.csv"  # expect: a matching rule (ignored)
+git check-ignore "runs/example/manifest.example.json"; "exit=$LASTEXITCODE"  # expect: no path printed, exit=1
 ```
-Expected: first two print a matching rule; the third prints nothing and `exit=1`.
+Expected: first two print a matching rule; the third prints nothing and `exit=1` (NOT ignored).
 
-- [ ] **Step 3: Add `reportlab` to `pyproject.toml`**
+- [ ] **Step 3: Add `reportlab` as a CORE dependency in `pyproject.toml`**
 
-In `[project.optional-dependencies]`, add a `reports` extra after the `sheets` extra (lines ~22-26):
+reportlab is a genuine runtime dependency AND is imported at the top of `scripts/pull_reports.py`, so `test_pull_reports.py` needs it whenever the suite runs. CI installs `pip install -e .[dev]` then runs the (non-realdata) PDF smoke test, so an optional extra would not be installed and CI would fail at import. Make it **core**, not an extra.
+
+In `[project]`, add reportlab to `dependencies` (lines 10-13):
 
 ```toml
-# PDF report generation (live use only; rendering is smoke-tested, not asserted pixel-wise).
-reports = [
+dependencies = [
+    "pandas>=2.0",
+    "pdfplumber>=0.11",
     "reportlab>=4.0",
 ]
 ```
@@ -432,7 +436,8 @@ def _soap_results(status, req_id, rows, obj="Send"):
         body += f'<Results xsi:type="{obj}">{cells}</Results>'
     rid = f"<RequestID>{req_id}</RequestID>" if req_id else ""
     return (
-        '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
+        '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><soap:Body>'  # xsi declared: fixtures use xsi:type
         '<RetrieveResponseMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">'
         f"<OverallStatus>{status}</OverallStatus>{rid}{body}"
         "</RetrieveResponseMsg></soap:Body></soap:Envelope>"
@@ -1287,6 +1292,20 @@ def test_mark_calendar_not_found_lists_candidates():
     res = pr.mark_calendar(lambda tab: writers[tab], "2026-06-24T00:00:00", ident, "7/15 JS")
     assert res["status"] == "not-found"
     assert res["cell"] is None
+    assert res["searched_tabs"] == ["June 2026", "July 2026"]
+
+
+def test_mark_calendar_ambiguous_across_both_tabs_writes_nothing():
+    june = FakeCalWriter([["Mount Vernon School", "eQC", "", "", "", "", "", "", "", ""]])
+    july = FakeCalWriter([["Mount Vernon School", "eQC", "", "", "", "", "", "", "", ""]])
+    writers = {"June 2026": june, "July 2026": july}
+    ident = naming.SendIdentity(client="Mount Vernon School", season="Summer", year="2026", type="eQC")
+    res = pr.mark_calendar(lambda tab: writers[tab], "2026-06-24T00:00:00", ident, "7/15 JS")
+    assert res["status"] == "ambiguous"
+    assert len(res["candidates"]) == 2  # both tabs scanned before deciding
+    assert {c["tab"] for c in res["candidates"]} == {"June 2026", "July 2026"}
+    assert res["candidates"][0]["type"] == "eQC"  # candidates carry client/type
+    assert june.updates == [] and july.updates == []  # nothing written when ambiguous
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1341,27 +1360,36 @@ def find_calendar_blocks(grid, client, type_):
 
 
 def mark_calendar(writer_for_tab, send_date_iso, identity, mark, fill_blanks_only=True):
-    result = {"tab": None, "cell": None, "status": "not-found", "candidates": []}
-    for tab in candidate_tabs(send_date_iso):
+    """Scan ALL candidate tabs fully, collect every client+type block, THEN decide.
+    Never writes until we know there is exactly one match across both months.
+    Candidates carry tab/row/client/type so status/dry-run reporting is useful."""
+    tabs = candidate_tabs(send_date_iso)
+    matches = []      # (tab, writer, grid, row, name_col)
+    candidates = []   # operator-facing block descriptors
+    for tab in tabs:
         writer = writer_for_tab(tab)
         grid = writer.get_values()
-        blocks = find_calendar_blocks(grid, identity.client, identity.type)
-        for (r, nc) in blocks:
-            result["candidates"].append({"tab": tab, "row": r + 1, "name_col": col_to_a1(nc)})
-        if len(blocks) == 1:
-            r, nc = blocks[0]
-            mark_col = nc + 4
-            a1 = f"{col_to_a1(mark_col)}{r + 1}"
-            current = str(_cell(grid, r, mark_col)).strip()
-            result.update(tab=tab, cell=a1)
-            if current and fill_blanks_only:
-                result["status"] = "already"
-                return result
+        for (r, nc) in find_calendar_blocks(grid, identity.client, identity.type):
+            matches.append((tab, writer, grid, r, nc))
+            candidates.append({
+                "tab": tab, "row": r + 1, "name_col": col_to_a1(nc),
+                "client": _cell(grid, r, nc), "type": _cell(grid, r, nc + 1),
+            })
+    result = {"tab": None, "cell": None, "status": None,
+              "candidates": candidates, "searched_tabs": tabs}
+    if len(matches) == 1:
+        tab, writer, grid, r, nc = matches[0]
+        mark_col = nc + 4
+        result.update(tab=tab, cell=f"{col_to_a1(mark_col)}{r + 1}")
+        if str(_cell(grid, r, mark_col)).strip() and fill_blanks_only:
+            result["status"] = "already"
+        else:
             writer.update_cell(r, mark_col, mark)
             result["status"] = "written"
-            return result
-    if len(result["candidates"]) > 1:
+    elif len(matches) > 1:
         result["status"] = "ambiguous"
+    else:
+        result["status"] = "not-found"
     return result
 ```
 
@@ -1643,6 +1671,15 @@ class FakeSfmc:
     def get_de_rows_rest(self, key): return self._de_rows
 
 
+def _full_sheet_grid():
+    """A Print Status header row with every column build_api_sheet_plan emits,
+    plus one all-blank data row for 'Example College' eNL."""
+    headers = ["Client", "Type", "# Total sent", "# Delivered", "# Unique opens",
+               "# Unique clicks", "# Total opens", "Booklet landing page unique clicks",
+               "Unique open rate %", "Unique click-through %", "Subject line"]
+    return [[], [], headers, ["Example College", "eNL"] + [""] * (len(headers) - 2)]
+
+
 def _deps(tmp_path, sfmc, sheet_grid=None, cal_writers=None, draft_writer=None):
     grid = sheet_grid if sheet_grid is not None else [[], [], ["Client", "Type"], []]
     return {
@@ -1678,11 +1715,11 @@ def test_run_send_happy_path_writes_everything(tmp_path):
             "HardBounces": "0", "SoftBounces": "0", "OtherBounces": "0", "Unsubscribes": "0"}
     ev = _events(sent=3, opens=2, clicks=2)
     sfmc = FakeSfmc(send, ev, de_rows=[{"subscriberkey": "a@x", "score": "5"}], de_cols=["SubscriberKey", "Score"])
-    grid = [[], [], ["Client", "Type", "# Total sent"], ["Example College", "eNL", ""]]
     dw = FakeDraftWriter()
-    deps = _deps(tmp_path, sfmc, sheet_grid=grid, draft_writer=dw)
+    deps = _deps(tmp_path, sfmc, sheet_grid=_full_sheet_grid(), draft_writer=dw)
     out = pr.run_send(_send_input(), deps, confirm_zero_ids=set())
     assert out["status"] == "complete"
+    assert deps["sheet_writer"].updates  # real sheet write happened (non-dry mode)
     assert out["metrics"]["Total Sent"] == 3
     assert (tmp_path / "Completed Reports" / "Example College - Spring 2026 eNL"
             / "Example College Spring 2026 eNL - Engagement Tracking Report.pdf").exists()
@@ -1704,18 +1741,27 @@ def test_run_send_needs_confirmation_skips_side_effects(tmp_path):
     assert len(dw.created) == 0  # drafts blocked
 
 
-def test_run_send_dry_run_writes_nothing(tmp_path):
+def test_run_send_dry_run_computes_plan_but_writes_nothing(tmp_path):
     send = {"ID": "1", "Subject": "Hi", "SentDate": "2026-06-24T00:00:00", "NumberSent": "3",
             "NumberDelivered": "3", "UniqueOpens": "2", "UniqueClicks": "2",
             "HardBounces": "0", "SoftBounces": "0", "OtherBounces": "0", "Unsubscribes": "0"}
     ev = _events(sent=3, opens=2, clicks=2)
     sfmc = FakeSfmc(send, ev, de_rows=[{"subscriberkey": "a@x"}], de_cols=["SubscriberKey"])
     dw = FakeDraftWriter()
-    deps = _deps(tmp_path, sfmc, draft_writer=dw)
+    deps = _deps(tmp_path, sfmc, sheet_grid=_full_sheet_grid(), draft_writer=dw)
     out = pr.run_send(_send_input(), deps, dry_run=True, confirm_zero_ids=set())
-    assert not (tmp_path / "Completed Reports").exists()  # no files
-    assert len(dw.created) == 0
-    assert out["sheet"]["status"] == "dry-run"
+    # Nothing is mutated:
+    assert not (tmp_path / "Completed Reports").exists()   # no CSV/PDF files
+    assert not (tmp_path / "Lead Scoring").exists()        # no lead file
+    assert dw.created == []                                # no drafts created
+    assert deps["sheet_writer"].updates == []             # no real sheet write
+    # ...but the full plan IS computed (spec §4):
+    assert out["status"] == "dry-run"
+    assert out["sheet"]["cells"]["# Total sent"]          # a real A1 ref for the matched row
+    assert out["drafts"]["report"]["to"] == []
+    assert out["drafts"]["report"]["attachments"]         # pdf + csvs listed
+    assert out["calendar"]["status"].startswith("dry-run")
+    assert out["lead_scoring_file"].startswith("sd_Example College - Lead Scoring")
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1740,6 +1786,21 @@ _EVENT_PROPS = {
     "BounceEvent": ["SubscriberKey", "EventDate", "BounceCategory", "SMTPReason"],
     "UnsubEvent": ["SubscriberKey", "EventDate"],
 }
+
+
+class _RecordingWriter:
+    """Wraps a SheetWriter for --dry-run: reads real values, records intended
+    writes instead of performing them (spec §4: dry-run mutates nothing)."""
+
+    def __init__(self, source):
+        self._source = source
+        self.updates = []
+
+    def get_values(self):
+        return self._source.get_values()
+
+    def update_cell(self, row, col, value):
+        self.updates.append((row, col, value))
 
 
 def require_hipaa(send):
@@ -1782,10 +1843,42 @@ def run_send(send, deps, *, force=False, dry_run=False, skip_drafts=False,
             out["status"] = "failed"; out["errors"].append(gate_flags[0]); return out
 
         if dry_run:
-            out["csv_files"] = [naming.finished_csv_name(identity, naming.REQUEST_FILE_DESCRIPTION if k == "Request Your" else k)
-                                for k, v in m["rows"].items() if v]
-            out["sheet"] = {"status": "dry-run"}; out["calendar"] = {"status": "dry-run"}
-            out["drafts"] = {"status": "dry-run"}; out["status"] = "dry-run"
+            # Full non-mutating plan (spec §4): compute CSV set, sheet row/cells,
+            # calendar tab/cell/candidates, and draft recipients/attachments —
+            # writing no files, no drafts, no sheet/calendar cells.
+            csv_names = [naming.finished_csv_name(
+                            identity, naming.REQUEST_FILE_DESCRIPTION if k == "Request Your" else k)
+                         for k, v in m["rows"].items() if v]
+            pdf_name = naming.finished_pdf_name(identity)
+            out["csv_files"] = csv_names
+            out["pdf_file"] = pdf_name
+            override = deps.get("lead_de_override")
+            de_name = override[0] if override else resolve_lead_de(
+                sfmc, send.get("lead_scoring_de", ""), identity.client)[0]
+            out["lead_scoring_file"] = lead_scoring_filename(de_name, datetime.date.today())
+            plan = build_api_sheet_plan(send_obj, m["Total Opens"], m["BH"])
+            out["flags"] += plan.flags
+            rec = _RecordingWriter(deps["sheet_writer"])
+            try:
+                written = sheet.write_send(rec, identity, plan, fill_blanks_only=not force)
+                out["sheet"] = {"status": "dry-run",
+                                "cells": {h: f"{col_to_a1(c)}{r + 1}" for h, (r, c) in written.items()}}
+            except sheet.SheetError as exc:
+                out["sheet"] = {"status": "dry-run", "error": str(exc)}
+                out["flags"].append(f"sheet (dry-run): {exc}")
+            mark = f"{datetime.date.today().month}/{datetime.date.today().day} {deps.get('mark_initials', 'JS')}"
+            out["calendar"] = mark_calendar(
+                lambda tab: _RecordingWriter(deps["calendar_writer_for_tab"](tab)),
+                send_obj.get("SentDate"), identity, mark, fill_blanks_only=not force)
+            out["calendar"]["status"] = f"dry-run:{out['calendar']['status']}"
+            out["drafts"] = {
+                "status": "dry-run",
+                "report": {"to": [], "subject": naming.email_subject(identity),
+                           "attachments": [pdf_name] + csv_names},
+                "kathryn": (None if hipaa else
+                            {"to": [_KATHRYN], "subject": f"Lead Score Ready - {identity.prefix}"}),
+            }
+            out["status"] = "dry-run"
             return out
 
         # Always-safe local artifacts (files only).
@@ -1989,8 +2082,7 @@ git commit -m "feat(pull_reports): orchestration + CLI (init/build/status, gates
 
 - [ ] **Step 1: Read the current operator-facing sections**
 
-Run: `./.venv/Scripts/python.exe -c "print(open('README.md',encoding='utf-8').read())" | head -120`
-Identify the section(s) that tell operators to use `sfmc-stage` / require the overview PDF (around README:60) and the AUTOMATION_STATUS "Not automated: ExactTarget export" line.
+Use the Read tool on `README.md` and `docs/AUTOMATION_STATUS.md` (PowerShell alternative if needed: `Get-Content README.md -TotalCount 120`). Identify the section(s) that tell operators to use `sfmc-stage` / require the overview PDF (around README:60) and the AUTOMATION_STATUS "Not automated: ExactTarget export" line.
 
 - [ ] **Step 2: Add a `pull_reports.py` section to `README.md`**
 
@@ -2051,11 +2143,11 @@ git commit -m "docs: point operators at pull_reports.py (supersedes sfmc-stage p
 - Report PDF, no side-channel (§5.3) → Task 7.
 - Lead Scoring separate + verbatim + Kathryn notification + HIPAA (§5.4) → Task 10; HIPAA-required enforced in Task 12.
 - API→SheetPlan, reuse write_send not build_sheet_plan (§5.5) → Task 8.
-- Calendar derived tab + candidates + fill-blank (§5.6) → Task 9; candidate printing in `cmd_status` (Task 12).
+- Calendar derived tab + candidates + fill-blank (§5.6) → Task 9 (`mark_calendar` scans **both** candidate tabs fully before deciding written/ambiguous/not-found; candidates carry tab/row/client/type + `searched_tabs`); candidate printing in `cmd_status` (Task 12).
 - Report draft blank-To absolute attachments (§5.7) → Task 11.
 - Idempotency/loud-failure/per-send isolation/PII (§6) → Task 12 `run_send` (try/except, manifest draft-id reuse, gitignored dirs).
 - Config + in-scope repo changes (§7) → Task 1 (gitignore/deps/env/example) + Task 13 (docs).
-- Dry-run non-mutation (§4, Rule 8) → Task 12 + `test_run_send_dry_run_writes_nothing`.
+- Dry-run non-mutation (§4, Rule 8) → Task 12 dry-run branch computes sheet cells + calendar tab/candidates + draft recipients/attachments via `_RecordingWriter`, asserting nothing is written (`test_run_send_dry_run_computes_plan_but_writes_nothing`).
 - Zero-core gate blocks side effects (§5.2) → Task 12 + `test_run_send_needs_confirmation_skips_side_effects`.
 - Out-of-scope items (§8) untouched: no send discovery, no HIPAA→PC, `sfmc.py` legacy left alone. ✓
 
