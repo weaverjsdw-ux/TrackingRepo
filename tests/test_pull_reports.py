@@ -273,3 +273,67 @@ def test_build_api_sheet_plan_omits_zero_booklet():
             "UniqueClicks": "0", "Subject": "Hi"}
     plan = pr.build_api_sheet_plan(send, total_opens=12, bh=0)
     assert "Booklet landing page unique clicks" not in plan.values
+
+
+def test_candidate_tabs_covers_send_month_and_next():
+    assert pr.candidate_tabs("2026-06-24T14:05:00") == ["June 2026", "July 2026"]
+    assert pr.candidate_tabs("2026-12-30T00:00:00") == ["December 2026", "January 2027"]
+
+
+def test_col_to_a1():
+    assert pr.col_to_a1(0) == "A"
+    assert pr.col_to_a1(24) == "Y"
+    assert pr.col_to_a1(26) == "AA"
+
+
+def test_find_calendar_blocks_matches_client_and_type():
+    grid = [
+        ["", "", "", "", "", "", "", "", "", ""],
+        ["Mount Vernon School", "eQC", "", "", "", "Other Client", "eNL", "", "", ""],
+    ]
+    blocks = pr.find_calendar_blocks(grid, "Mount Vernon School", "eQC")
+    assert blocks == [(1, 0)]
+
+
+class FakeCalWriter:
+    def __init__(self, grid):
+        self.grid = grid
+        self.updates = []
+
+    def get_values(self):
+        return self.grid
+
+    def update_cell(self, row, col, value):
+        self.updates.append((row, col, value))
+
+
+def test_mark_calendar_fills_blank_plus4_cell():
+    grid = [["", "", "", "", "", "", "", "", "", ""],
+            ["Mount Vernon School", "eQC", "", "", "", "", "", "", "", ""]]
+    writers = {"June 2026": FakeCalWriter(grid), "July 2026": FakeCalWriter([[]])}
+    ident = naming.SendIdentity(client="Mount Vernon School", season="Summer", year="2026", type="eQC")
+    res = pr.mark_calendar(lambda tab: writers[tab], "2026-06-24T00:00:00", ident, "7/15 JS")
+    assert res["tab"] == "June 2026" and res["cell"] == "E2" and res["status"] == "written"
+    assert writers["June 2026"].updates == [(1, 4, "7/15 JS")]
+
+
+def test_mark_calendar_not_found_lists_candidates():
+    writers = {"June 2026": FakeCalWriter([["Nobody", "eNL"]]), "July 2026": FakeCalWriter([[]])}
+    ident = naming.SendIdentity(client="Ghost", season="Summer", year="2026", type="eQC")
+    res = pr.mark_calendar(lambda tab: writers[tab], "2026-06-24T00:00:00", ident, "7/15 JS")
+    assert res["status"] == "not-found"
+    assert res["cell"] is None
+    assert res["searched_tabs"] == ["June 2026", "July 2026"]
+
+
+def test_mark_calendar_ambiguous_across_both_tabs_writes_nothing():
+    june = FakeCalWriter([["Mount Vernon School", "eQC", "", "", "", "", "", "", "", ""]])
+    july = FakeCalWriter([["Mount Vernon School", "eQC", "", "", "", "", "", "", "", ""]])
+    writers = {"June 2026": june, "July 2026": july}
+    ident = naming.SendIdentity(client="Mount Vernon School", season="Summer", year="2026", type="eQC")
+    res = pr.mark_calendar(lambda tab: writers[tab], "2026-06-24T00:00:00", ident, "7/15 JS")
+    assert res["status"] == "ambiguous"
+    assert len(res["candidates"]) == 2  # both tabs scanned before deciding
+    assert {c["tab"] for c in res["candidates"]} == {"June 2026", "July 2026"}
+    assert res["candidates"][0]["type"] == "eQC"  # candidates carry client/type
+    assert june.updates == [] and july.updates == []  # nothing written when ambiguous

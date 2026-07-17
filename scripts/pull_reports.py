@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import datetime
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -513,3 +514,76 @@ def build_api_sheet_plan(send, total_opens, bh):
     if subject:
         plan.values["Subject line"] = subject
     return plan
+
+
+_CAL_NAME_COLS = (0, 5, 10, 15, 20)
+
+
+def _cal_key(s):
+    return " ".join(re.findall(r"[a-z0-9]+", (s or "").lower()))
+
+
+def candidate_tabs(send_date_iso):
+    """Report task lags the send by ~2 weeks, so search the send month + next."""
+    d = datetime.date.fromisoformat((send_date_iso or "").split("T")[0])
+    nxt = (d.replace(day=1) + datetime.timedelta(days=32)).replace(day=1)
+    return [d.strftime("%B %Y"), nxt.strftime("%B %Y")]
+
+
+def col_to_a1(col):
+    s = ""
+    col += 1
+    while col:
+        col, rem = divmod(col - 1, 26)
+        s = chr(65 + rem) + s
+    return s
+
+
+def _cell(grid, r, c):
+    row = grid[r] if r < len(grid) else []
+    return row[c] if c < len(row) else ""
+
+
+def find_calendar_blocks(grid, client, type_):
+    ck, tk = _cal_key(client), _cal_key(type_)
+    out = []
+    for r in range(len(grid)):
+        for nc in _CAL_NAME_COLS:
+            name = _cal_key(_cell(grid, r, nc))
+            if name and ck in name and tk and tk == _cal_key(_cell(grid, r, nc + 1)):
+                out.append((r, nc))
+    return out
+
+
+def mark_calendar(writer_for_tab, send_date_iso, identity, mark, fill_blanks_only=True):
+    """Scan ALL candidate tabs fully, collect every client+type block, THEN decide.
+    Never writes until we know there is exactly one match across both months.
+    Candidates carry tab/row/client/type so status/dry-run reporting is useful."""
+    tabs = candidate_tabs(send_date_iso)
+    matches = []      # (tab, writer, grid, row, name_col)
+    candidates = []   # operator-facing block descriptors
+    for tab in tabs:
+        writer = writer_for_tab(tab)
+        grid = writer.get_values()
+        for (r, nc) in find_calendar_blocks(grid, identity.client, identity.type):
+            matches.append((tab, writer, grid, r, nc))
+            candidates.append({
+                "tab": tab, "row": r + 1, "name_col": col_to_a1(nc),
+                "client": _cell(grid, r, nc), "type": _cell(grid, r, nc + 1),
+            })
+    result = {"tab": None, "cell": None, "status": None,
+              "candidates": candidates, "searched_tabs": tabs}
+    if len(matches) == 1:
+        tab, writer, grid, r, nc = matches[0]
+        mark_col = nc + 4
+        result.update(tab=tab, cell=f"{col_to_a1(mark_col)}{r + 1}")
+        if str(_cell(grid, r, mark_col)).strip() and fill_blanks_only:
+            result["status"] = "already"
+        else:
+            writer.update_cell(r, mark_col, mark)
+            result["status"] = "written"
+    elif len(matches) > 1:
+        result["status"] = "ambiguous"
+    else:
+        result["status"] = "not-found"
+    return result
