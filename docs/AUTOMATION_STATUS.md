@@ -1,6 +1,6 @@
 # Tracking Reports Automation Status
 
-Last reviewed: 2026-06-11
+Last reviewed: 2026-07-17
 
 ## Automated Now
 
@@ -36,12 +36,21 @@ Last reviewed: 2026-06-11
 - Scheduled runs refresh `logs/status.json` from `python -m tracking.cli status
   --json`, giving Power Automate or other wrappers structured pending and draft
   blocker data without scraping the text log.
-- SFMC/ExactTarget API automation is gated behind the same probe used by
-  `sfmc-probe`; `sfmc-stage` runs that gate before fetching artifacts. Complete
-  SFMC artifact sets are validated through the normal parser and promoted into
-  `drop/processed` so existing Sheet, draft, and status commands consume them
-  through the same path as Gmail intake. Existing processed folders are not
-  replaced unless `sfmc-stage --force` is used deliberately.
+- Direct SFMC/ExactTarget export is now automated end-to-end by
+  `scripts/pull_reports.py` (`init` / `build` / `status`), superseding the
+  older `sfmc-stage`-into-`drop/processed` path. `init` scaffolds a run
+  manifest at `runs/<run-id>/manifest.json`; `build` pulls each send's
+  engagement CSVs, reconstructs the overview PDF from the `Send` object and
+  tracking events (no manual overview-PDF email required for this path),
+  produces the Lead Scoring export, writes the Print Status Report row and
+  calendar mark fill-blanks-only, and creates Gmail drafts only; `status`
+  reads the manifest as the authoritative record of what happened per send.
+  `build --dry-run` computes the same plan without writing anything. A send
+  with zero Unique Opens/Clicks is parked as `needs_confirmation` until
+  released with `--confirm-zero <send_id>`, and HIPAA-flagged sends skip the
+  Kathryn notification. `sfmc-probe`/`sfmc-stage` still exist for the older
+  Gmail-intake-completion path but are no longer the recommended route for
+  pulling sends directly from SFMC.
 - Scheduled `run --drafts` creates drafts only after pull and Sheet write-back
   complete cleanly in the same run.
 
@@ -50,8 +59,11 @@ Last reviewed: 2026-06-11
 - Sending report emails is not automated. Drafts are created for review only.
 - Lead scoring is intentionally deferred. Lead-score files remain identified and
   ignored by the engagement pipeline.
-- Official overview PDFs remain required. Sends without an overview PDF stay
-  pending instead of being guessed from partial data.
+- Official overview PDFs remain required for the Gmail-intake path. Sends
+  without an overview PDF email stay pending instead of being guessed from
+  partial data. (The direct `scripts/pull_reports.py` path is unaffected —
+  it reconstructs the overview PDF itself from the `Send` object and
+  tracking events, so it does not wait on that email.)
 - Draft creation is blocked until the git-ignored `contacts.csv` has reviewed
   PC emails and enabled delivery rows. `contacts.example.csv` is committed as
   the operator template, and `contacts-init` can generate a local starter from

@@ -89,6 +89,30 @@ print(r.metrics)          # {"Total Sent": ..., "Unique Opens": ..., "BH": ..., 
 print("\n".join(r.log))   # auditable per-run log
 ```
 
+## Pulling reports directly from SFMC (`scripts/pull_reports.py`)
+
+These sends are never emailed into Gmail, so pull them straight from Marketing
+Cloud. Facts for a run live in `runs/<run-id>/manifest.json`; nothing is hardcoded.
+
+    # 1. Scaffold this month's run and fill in the sends (send_id, booklet_selector,
+    #    lead_scoring_de, hipaa) — hipaa is REQUIRED per send.
+    ./.venv/Scripts/python.exe scripts/pull_reports.py init
+
+    # 2. Preview without writing anything (reads APIs, mutates nothing):
+    ./.venv/Scripts/python.exe scripts/pull_reports.py build --dry-run
+
+    # 3. Build for real (CSVs + PDF + Lead Scoring + Print Status row + calendar + drafts):
+    ./.venv/Scripts/python.exe scripts/pull_reports.py build
+
+    # 4. See what happened (authoritative — reads the manifest):
+    ./.venv/Scripts/python.exe scripts/pull_reports.py status
+
+The overview PDF is reconstructed from the `Send` object + tracking events — the
+old `sfmc-stage` / overview-PDF-required path is superseded. Sheet and calendar
+writes are fill-blank-only; Gmail only ever creates drafts. A zero Unique
+Opens/Clicks parks the send as `needs_confirmation` (release with
+`--confirm-zero <send_id>`); HIPAA sends skip the Kathryn notification.
+
 ## Modules (`src/tracking/`)
 
 | Module | Responsibility |
