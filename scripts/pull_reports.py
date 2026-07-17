@@ -665,3 +665,25 @@ def build_kathryn_draft(identity, lead_file_path, hipaa):
         f"File: {p.name}\nLocation: {p.parent}\n"
     )
     return DraftEmail(to=[_KATHRYN], subject=f"Lead Score Ready - {identity.prefix}", body=body, attachments=[])
+
+
+def build_report_draft(identity, folder):
+    """Build a report delivery draft for the operator.
+
+    Returns a DraftEmail with:
+    - to: [] (blank; operator fills recipients)
+    - subject: naming.email_subject(identity)
+    - body: "" (empty)
+    - attachments: PDF (if present) FIRST, then metric CSVs matching '<prefix> - *'
+      and excluding 'sd_*', all as absolute paths (MAX_PATH-safe for long client names).
+    """
+    folder = Path(folder).resolve()  # absolute -> dodges Windows MAX_PATH on long names
+    pdf = folder / naming.finished_pdf_name(identity)
+    csvs = sorted(
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() == ".csv"
+        and p.name.startswith(f"{identity.prefix} - ")
+        and not p.name.lower().startswith("sd_")
+    )
+    attachments = ([pdf] if pdf.is_file() else []) + csvs
+    return DraftEmail(to=[], subject=naming.email_subject(identity), body="", attachments=attachments)

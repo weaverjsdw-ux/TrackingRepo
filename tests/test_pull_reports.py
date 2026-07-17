@@ -367,3 +367,21 @@ def test_build_kathryn_draft_notification_only():
 
 def test_build_kathryn_draft_hipaa_skips():
     assert pr.build_kathryn_draft(_identity(), Path("/abs/x.csv"), hipaa=True) is None
+
+
+def test_build_report_draft_blank_to_absolute_attachments(tmp_path):
+    ident = _identity()
+    folder = tmp_path / ident.folder_name
+    folder.mkdir()
+    (folder / naming.finished_pdf_name(ident)).write_bytes(b"%PDF-1.4")
+    (folder / naming.finished_csv_name(ident, "Total Sent")).write_text("x")
+    (folder / "sd_Example College - Lead Scoring20260715.csv").write_text("y")  # must NOT attach
+    d = pr.build_report_draft(ident, folder)
+    assert d.to == []
+    assert d.body == ""
+    assert d.subject == naming.email_subject(ident)
+    names = [p.name for p in d.attachments]
+    assert names[0].endswith("Engagement Tracking Report.pdf")  # PDF first
+    assert any(n.endswith("- Total Sent.csv") for n in names)
+    assert not any(n.startswith("sd_") for n in names)
+    assert all(Path(p).is_absolute() for p in d.attachments)  # MAX_PATH-safe
