@@ -232,10 +232,11 @@ Self-contained section; **not** tangled into engagement CSV generation.
   `DataExtensionField.Ordinal`.
 - **Save:** `TRACKINGREPORTS/Lead Scoring/` (flat; filenames self-identify). Filename =
   `<resolved DE name><YYYYMMDD>.csv` (verbatim style; never renamed).
-- **Kathryn draft (notification-only):** a Gmail draft to
-  `kathryn.baugh@pentera.com` whose body references the **local folder + filename** — the
-  Lead Scoring CSV is **not attached** (Client Access upload is Kathy's step). Records the
-  draft id in the manifest.
+- **Kathryn draft:** a Gmail draft to `kathryn.baugh@pentera.com` with the **Lead Scoring
+  CSV attached** (absolute path, MAX_PATH-safe). The body only states the file is attached
+  and ready for Client Access upload — it does **not** dump the local path/location.
+  Records the draft id in the manifest. *(Amended 2026-07-23: was notification-only with the
+  path in the body and no attachment; John changed it to attach the actual file.)*
 - **HIPAA — `hipaa` is a REQUIRED per-send fact; if absent the send fails loud** (never
   assume non-HIPAA). When `true`, **skip** the Kathryn draft and attachment entirely and
   **flag** ("HIPAA — PC routing not yet designed"); the data-file export itself still runs.
@@ -300,7 +301,8 @@ file is silently skipped). Records the draft id in the manifest.
   the batch.
 - **PII/PHI:** Subscriber CSVs (SubscriberKey = email) and Lead Scoring data are sensitive.
   Files land only in the gitignored report / `Lead Scoring/` folders; no cell values are
-  logged; the Kathryn draft carries no attachment; HIPAA sends skip Kathryn entirely.
+  logged; the Kathryn draft attaches only the Lead Scoring CSV (a Gmail draft, never sent);
+  HIPAA sends skip Kathryn entirely.
 
 ## 7. Configuration and in-scope repo changes
 

@@ -659,22 +659,21 @@ def write_lead_scoring_csv(folder, de_name, columns, rows, when):
 
 
 def build_kathryn_draft(identity, lead_file_path, hipaa):
-    """Build a notification draft for Kathryn.
+    """Build the Lead Score draft for Kathryn.
 
     When hipaa is True, return None (caller flags + skips).
-    When False, return a DraftEmail to kathryn.baugh@pentera.com, notification-only,
-    with attachments == [] (lead CSV is NOT attached; Client Access upload is Kathy's step).
-    Body references the local filename.
+    When False, return a DraftEmail to kathryn.baugh@pentera.com with the Lead
+    Scoring CSV ATTACHED (absolute path, MAX_PATH-safe). The body just says the
+    file is attached — no local path/location is dumped into the body.
     """
     if hipaa:
         return None
-    p = Path(lead_file_path)
+    p = Path(lead_file_path).resolve()  # absolute -> dodges Windows MAX_PATH on long names
     body = (
         f"The lead score for {identity.client} {identity.season} {identity.year} {identity.type} "
-        f"is ready for Client Access upload.\n\n"
-        f"File: {p.name}\nLocation: {p.parent}\n"
+        f"is attached and ready for Client Access upload.\n"
     )
-    return DraftEmail(to=[_KATHRYN], subject=f"Lead Score Ready - {identity.prefix}", body=body, attachments=[])
+    return DraftEmail(to=[_KATHRYN], subject=f"Lead Score Ready - {identity.prefix}", body=body, attachments=[p])
 
 
 def build_report_draft(identity, folder):
@@ -797,7 +796,8 @@ def run_send(send, deps, *, force=False, dry_run=False, skip_drafts=False,
                 "report": {"to": [], "subject": naming.email_subject(identity),
                            "attachments": [pdf_name] + csv_names},
                 "kathryn": (None if hipaa else
-                            {"to": [_KATHRYN], "subject": f"Lead Score Ready - {identity.prefix}"}),
+                            {"to": [_KATHRYN], "subject": f"Lead Score Ready - {identity.prefix}",
+                             "attachments": [out["lead_scoring_file"]]}),
             }
             out["status"] = "dry-run"
             return out
