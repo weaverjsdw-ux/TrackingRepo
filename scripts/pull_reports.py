@@ -531,7 +531,8 @@ _CAL_NAME_COLS = (0, 5, 10, 15, 20)
 
 
 def _cal_key(s):
-    return " ".join(re.findall(r"[a-z0-9]+", (s or "").lower()))
+    # Cells arrive as int/float too (UNFORMATTED_VALUE); coerce before lower().
+    return " ".join(re.findall(r"[a-z0-9]+", str(s if s is not None else "").lower()))
 
 
 def candidate_tabs(send_date_iso):

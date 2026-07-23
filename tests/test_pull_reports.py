@@ -303,6 +303,18 @@ def test_find_calendar_blocks_matches_client_and_type():
     assert blocks == [(1, 0)]
 
 
+def test_find_calendar_blocks_tolerates_numeric_cells():
+    # GoogleSheetsWriter reads with UNFORMATTED_VALUE, so numeric calendar cells
+    # (date serials, counts) come back as int/float. A number in a name column
+    # must not crash the client-key match (regression: 'int' has no .lower()).
+    grid = [
+        [45000, "", "", "", "", 12, "", "", "", ""],
+        ["Mount Vernon School", "eQC", "", "", "", 3, "eNL", "", "", ""],
+    ]
+    blocks = pr.find_calendar_blocks(grid, "Mount Vernon School", "eQC")
+    assert blocks == [(1, 0)]
+
+
 class FakeCalWriter:
     def __init__(self, grid):
         self.grid = grid
