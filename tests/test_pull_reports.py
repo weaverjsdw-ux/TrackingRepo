@@ -385,9 +385,8 @@ def test_build_kathryn_draft_attaches_lead_file():
     # The lead CSV is ATTACHED, by absolute path (MAX_PATH-safe).
     assert [p.name for p in d.attachments] == ["sd_Example College - Lead Scoring20260715.csv"]
     assert all(Path(p).is_absolute() for p in d.attachments)
-    # Body says it's attached; it must NOT dump the local path/location.
-    assert "attached" in d.body.lower()
-    assert "Location:" not in d.body and "File:" not in d.body
+    # No body — attachment only (the subject identifies the send).
+    assert d.body == ""
 
 
 def test_build_kathryn_draft_hipaa_skips():

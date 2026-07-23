@@ -233,10 +233,10 @@ Self-contained section; **not** tangled into engagement CSV generation.
 - **Save:** `TRACKINGREPORTS/Lead Scoring/` (flat; filenames self-identify). Filename =
   `<resolved DE name><YYYYMMDD>.csv` (verbatim style; never renamed).
 - **Kathryn draft:** a Gmail draft to `kathryn.baugh@pentera.com` with the **Lead Scoring
-  CSV attached** (absolute path, MAX_PATH-safe). The body only states the file is attached
-  and ready for Client Access upload — it does **not** dump the local path/location.
-  Records the draft id in the manifest. *(Amended 2026-07-23: was notification-only with the
-  path in the body and no attachment; John changed it to attach the actual file.)*
+  CSV attached** (absolute path, MAX_PATH-safe), the subject `Lead Score Ready - <prefix>`,
+  and an **empty body** (attachment only — the procedure calls for no body text). Records the
+  draft id in the manifest. *(Amended 2026-07-23: was notification-only with the path in the
+  body and no attachment; John changed it to attach the actual file with no body.)*
 - **HIPAA — `hipaa` is a REQUIRED per-send fact; if absent the send fails loud** (never
   assume non-HIPAA). When `true`, **skip** the Kathryn draft and attachment entirely and
   **flag** ("HIPAA — PC routing not yet designed"); the data-file export itself still runs.

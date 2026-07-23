@@ -663,17 +663,13 @@ def build_kathryn_draft(identity, lead_file_path, hipaa):
 
     When hipaa is True, return None (caller flags + skips).
     When False, return a DraftEmail to kathryn.baugh@pentera.com with the Lead
-    Scoring CSV ATTACHED (absolute path, MAX_PATH-safe). The body just says the
-    file is attached — no local path/location is dumped into the body.
+    Scoring CSV ATTACHED (absolute path, MAX_PATH-safe) and an EMPTY body — the
+    subject identifies the send; the procedure calls for no body text.
     """
     if hipaa:
         return None
     p = Path(lead_file_path).resolve()  # absolute -> dodges Windows MAX_PATH on long names
-    body = (
-        f"The lead score for {identity.client} {identity.season} {identity.year} {identity.type} "
-        f"is attached and ready for Client Access upload.\n"
-    )
-    return DraftEmail(to=[_KATHRYN], subject=f"Lead Score Ready - {identity.prefix}", body=body, attachments=[p])
+    return DraftEmail(to=[_KATHRYN], subject=f"Lead Score Ready - {identity.prefix}", body="", attachments=[p])
 
 
 def build_report_draft(identity, folder):
