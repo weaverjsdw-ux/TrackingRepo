@@ -50,3 +50,8 @@ venv/
 *.egg-info/
 build/
 dist/
+
+# Superpowers brainstorming visual-companion working files (mockup HTML, server
+# state). The current session's files live one level up in ../.superpowers/, but
+# this guards against a companion run rooted inside this repo.
+.superpowers/
