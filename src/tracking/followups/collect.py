@@ -7,6 +7,13 @@ from .model import SentRecord, ReplyHit
 def _dt(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
+def _as_list(v):
+    if v is None:
+        return []
+    if isinstance(v, dict):
+        return [v]
+    return v
+
 def parse_scan(payload: dict) -> "tuple[list[SentRecord], dict[str, ReplyHit]]":
     records = [
         SentRecord(
@@ -17,7 +24,7 @@ def parse_scan(payload: dict) -> "tuple[list[SentRecord], dict[str, ReplyHit]]":
             message_id=s["message_id"],
             subject=s.get("subject", ""),
         )
-        for s in payload.get("sent", [])
+        for s in _as_list(payload.get("sent"))
     ]
     replies = {
         r["recipient_smtp"].lower(): ReplyHit(
@@ -25,7 +32,7 @@ def parse_scan(payload: dict) -> "tuple[list[SentRecord], dict[str, ReplyHit]]":
             folder=r["folder"],
             received=_dt(r["received"]),
         )
-        for r in payload.get("replies", [])
+        for r in _as_list(payload.get("replies"))
     }
     return records, replies
 

@@ -45,3 +45,20 @@ def test_parse_scan_builds_records_and_replies():
     assert records[0].recipient_domain == "parkschool.net"
     assert "jaltchek@parkschool.net" in replies
     assert replies["jaltchek@parkschool.net"].folder == "Leads"
+
+def test_parse_scan_single_element_serialized_as_object():
+    # PS 5.1 ConvertTo-Json unwraps a 1-element collection into a bare object
+    payload = {
+        "sent": {"conversation_id": "cA", "recipient_smtp": "a@y.org",
+                 "sent_on": "2026-07-17T09:00:00", "message_id": "<1@x>", "subject": "Following up"},
+        "replies": {"recipient_smtp": "a@y.org", "from_domain": "y.org",
+                    "folder": "Inbox", "received": "2026-07-19T08:30:00"},
+    }
+    records, replies = parse_scan(payload)
+    assert len(records) == 1
+    assert records[0].recipient_smtp == "a@y.org"
+    assert replies["a@y.org"].folder == "Inbox"
+
+def test_parse_scan_empty_or_null_results():
+    assert parse_scan({"sent": None, "replies": None}) == ([], {})
+    assert parse_scan({}) == ([], {})
