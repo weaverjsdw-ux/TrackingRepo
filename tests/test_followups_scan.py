@@ -1,7 +1,9 @@
 # tests/test_followups_scan.py
+import json, pathlib
 from datetime import datetime
 from tracking.followups.model import SentRecord, ReplyHit
 from tracking.followups.scan import build_threads
+from tracking.followups.collect import parse_scan
 
 def _rec(smtp, when, conv, subj="Following up"):
     return SentRecord(conv, smtp, smtp.split("@")[-1], when, f"<{when.isoformat()}@x>", subj)
@@ -33,3 +35,13 @@ def test_reply_attached_by_recipient():
     reply = ReplyHit("y.org", "Leads", datetime(2026, 7, 19))
     threads = build_threads(recs, {"a@y.org": reply})
     assert threads[0].reply is reply
+
+def test_parse_scan_builds_records_and_replies():
+    payload = json.loads(
+        pathlib.Path("tests/fixtures/followups/scan_sample.json").read_text()
+    )
+    records, replies = parse_scan(payload)
+    assert len(records) == 2
+    assert records[0].recipient_domain == "parkschool.net"
+    assert "jaltchek@parkschool.net" in replies
+    assert replies["jaltchek@parkschool.net"].folder == "Leads"
