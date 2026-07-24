@@ -8,6 +8,11 @@ builds the Google Sheet write plan. The live edge is the CLI: Gmail pulls staged
 attachments, Sheets writes the approved values, filing copies renamed
 deliverables locally, and Gmail drafts report-delivery emails without sending.
 
+> **Onboarding a second operator / backup?** Start with
+> [docs/COWORKER_ONBOARDING.md](docs/COWORKER_ONBOARDING.md) — a Windows setup runbook
+> for reusing the shared Google service account and SFMC package with your own Gmail,
+> covering both the direct-SFMC `pull_reports.py` path and the Gmail-intake path.
+
 ## Run
 
 ```powershell
