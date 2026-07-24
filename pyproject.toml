@@ -13,6 +13,9 @@ dependencies = [
     "reportlab>=4.0",
 ]
 
+[project.scripts]
+js-followups = "tracking.followups.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 # Phase 2 Gmail adapter (live use only; the orchestration is tested with a fake).
